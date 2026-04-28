@@ -111,7 +111,7 @@ Please open a browser with this IP address : http://192.168.4.1 to connect to th
 |Standard|NGTF	|	2000-2099         |
 |Standard|LTARF|	2100-2199       |
 |Standard|DATE	|	3000-3099   |
-|Standard|STGE	|4000-4099|
+|Standard|STGE|4000-4099|
 |Standard|EAST	|	1000-1003       |
 |Standard|EASF01	|	1004-1007   |
 |Standard|EASF02	|	1008-1011   |
