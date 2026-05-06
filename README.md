@@ -67,7 +67,7 @@ Please open a browser with this IP address : http://192.168.4.1 to connect to th
 ## Modbus slave parameter
 
 ### By default
-* id master : 1 (editable)
+* id master : **11** (editable — chosen to avoid conflict with SmartEVSE internal addresses 1-10)
 * speed (bauds) : 9600 (editable)
 * Data bits : 8
 * Stop bits : 1
@@ -219,6 +219,66 @@ Click to **"save"** to validate
 
 ### Modbus Specific mapping
 <img src="https://github.com/fairecasoimeme/TIC-DIN-MODBUS/blob/master/Doc/images/specific_mapping.png" width="600">
+
+---
+
+## SmartEVSE v3.1 — Dynamic Load Balancing (Linky as mains meter)
+
+This fork adds native compatibility with [SmartEVSE v3.1](https://github.com/SmartEVSE/SmartEVSE-3) dynamic load balancing. The device exposes a **SmartEVSE mirror register block** at addresses **0–19** that SmartEVSE can read directly as a Custom meter.
+
+### Mirror register block (registers 0–19)
+
+All values are **signed INT32, big-endian (high word first)**, FC=3 (holding registers).
+
+| Registers | Content | Unit | Source TIC field |
+|-----------|---------|------|-----------------|
+| 0–1 | Current L1 | mA | IRMS1 / IINST1 |
+| 2–3 | Current L2 | mA | IRMS2 / IINST2 |
+| 4–5 | Current L3 | mA | IRMS3 / IINST3 |
+| 6–7 | Voltage L1 | V×10 | URMS1 |
+| 8–9 | Voltage L2 | V×10 | URMS2 |
+| 10–11 | Voltage L3 | V×10 | URMS3 |
+| 12–13 | Total apparent power | VA | SINSTS / PAPP |
+| 14–15 | Apparent power L1 | VA | SINSTS1 / PAPP |
+| 16–17 | Apparent power L2 | VA | SINSTS2 |
+| 18–19 | Apparent power L3 | VA | SINSTS3 |
+
+> **Historic single-phase meters**: L1 carries IINST and PAPP; L2/L3 are set to 0.
+
+### Wiring
+
+Connect the TIC-DIN-MODBUS RS485 A/B terminals to the same RS485 bus as the SmartEVSE. Both devices share 9600 baud 8N1.
+
+### SmartEVSE v3.1 Custom Meter configuration
+
+In the SmartEVSE menu (`CONFIG → Meter → Mains`), select **Custom** and apply these settings:
+
+| SmartEVSE parameter | Value | Notes |
+|---------------------|-------|-------|
+| Modbus address | **11** | matches TIC-DIN-MODBUS default |
+| Function | **3** | holding registers (FC=03) |
+| Data type | **INT32** | 32-bit signed integer |
+| Endianness | **HBF & HWF** (value 3) | big-endian, high word first |
+| Current register (I) | **0** | L1/L2/L3 at 0–1, 2–3, 4–5 |
+| Current divisor (I) | **3** | mA ÷ 10³ = A |
+| Voltage register (U) | **6** | L1/L2/L3 at 6–7, 8–9, 10–11 |
+| Voltage divisor (U) | **1** | V×10 ÷ 10 = V |
+| Power register (P) | **14** | L1/L2/L3 at 14–15, 16–17, 18–19 |
+| Power divisor (P) | **0** | VA (used as W approximation) |
+
+> **Note on apparent vs. active power**: Linky reports apparent power (VA), not active power (W). For purely resistive loads the difference is negligible. For installations with significant reactive loads, SINSTS will slightly overestimate the load seen by SmartEVSE, which is the safe (conservative) direction for load balancing.
+
+### Verify communication
+
+Use a Modbus RTU master tool (e.g. `modpoll`, Modbus Poll app) to confirm the TIC-DIN-MODBUS answers on address 11 before configuring SmartEVSE:
+
+```
+modpoll -m rtu -a 11 -r 1 -c 20 -t 4 /dev/ttyUSB0
+```
+
+Registers 0–19 should show non-zero values once the Linky meter is transmitting.
+
+---
 
 ## Changelog
 

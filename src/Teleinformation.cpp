@@ -16,6 +16,24 @@ extern uint16_t holdingRegisters[24600];
 extern uint32_t u32Timeout;
 extern uint8_t u8ErrorDecode;
 
+// SmartEVSE v3.1 mirror registers (0-19) — INT32 big-endian (high word first)
+// Configure SmartEVSE Custom Meter: FC=3, INT32, endian HBF_HWF(3), IDivisor=3, UDivisor=1, PDivisor=0
+#define SE_IRMS1_REG  0   // Current L1 (mA)
+#define SE_IRMS2_REG  2   // Current L2 (mA)
+#define SE_IRMS3_REG  4   // Current L3 (mA)
+#define SE_URMS1_REG  6   // Voltage L1 (V*10)
+#define SE_URMS2_REG  8   // Voltage L2 (V*10)
+#define SE_URMS3_REG  10  // Voltage L3 (V*10)
+#define SE_PAPP_REG   12  // Total apparent power (VA)
+#define SE_PAPP1_REG  14  // L1 apparent power (VA)
+#define SE_PAPP2_REG  16  // L2 apparent power (VA)
+#define SE_PAPP3_REG  18  // L3 apparent power (VA)
+
+static void seWriteInt32(uint16_t reg, int32_t value) {
+    holdingRegisters[reg]     = (uint16_t)((value >> 16) & 0xFFFF);
+    holdingRegisters[reg + 1] = (uint16_t)(value & 0xFFFF);
+}
+
 bool bDataProcessingHisto(char *au8Command,char *au8Value, uint8_t au8Pos)
 {
   if (memcmp(au8Command,"ADCO",4)==0)
@@ -173,6 +191,7 @@ bool bDataProcessingHisto(char *au8Command,char *au8Value, uint8_t au8Pos)
     uint16_t tmp = atoi(au8Value);
 
     holdingRegisters[1320] = (uint16_t)tmp & 0xFFFF;
+    seWriteInt32(SE_IRMS1_REG, (int32_t)tmp * 1000);
     Serial.print("IINST1 : ");
     Serial.println(tmp);
   }else if (memcmp(au8Command,"IINST2",6)==0)
@@ -180,6 +199,7 @@ bool bDataProcessingHisto(char *au8Command,char *au8Value, uint8_t au8Pos)
     uint16_t tmp = atoi(au8Value);
 
     holdingRegisters[1321] = (uint16_t)tmp & 0xFFFF;
+    seWriteInt32(SE_IRMS2_REG, (int32_t)tmp * 1000);
     Serial.print("IINST2 : ");
     Serial.println(tmp);
   }else if (memcmp(au8Command,"IINST3",6)==0)
@@ -187,6 +207,7 @@ bool bDataProcessingHisto(char *au8Command,char *au8Value, uint8_t au8Pos)
     uint16_t tmp = atoi(au8Value);
 
     holdingRegisters[1322] = (uint16_t)tmp & 0xFFFF;
+    seWriteInt32(SE_IRMS3_REG, (int32_t)tmp * 1000);
     Serial.print("IINST3 : ");
     Serial.println(tmp);
   }else if (memcmp(au8Command,"IINST",5)==0)
@@ -194,6 +215,10 @@ bool bDataProcessingHisto(char *au8Command,char *au8Value, uint8_t au8Pos)
     uint16_t tmp = atoi(au8Value);
 
     holdingRegisters[1320] = (uint16_t)tmp & 0xFFFF;
+    // Single-phase: mirror on L1, zero out L2/L3
+    seWriteInt32(SE_IRMS1_REG, (int32_t)tmp * 1000);
+    seWriteInt32(SE_IRMS2_REG, 0);
+    seWriteInt32(SE_IRMS3_REG, 0);
     Serial.print("IINST : ");
     Serial.println(tmp);
   }else if (memcmp(au8Command,"IMAX1",5)==0)
@@ -237,12 +262,18 @@ bool bDataProcessingHisto(char *au8Command,char *au8Value, uint8_t au8Pos)
     Serial.println(tmp);
   }else if (memcmp(au8Command,"PAPP",4)==0)
   {
-    long long tmp = strtoull(au8Value,NULL,10);  
+    long long tmp = strtoull(au8Value,NULL,10);
 
     holdingRegisters[1332] = (uint16_t)tmp & 0xFFFF;
     holdingRegisters[1331] = (uint16_t)(tmp >> 16 ) & 0xFFFF;
     holdingRegisters[1330] = (uint16_t)(tmp >> 32 ) & 0xFFFF;
     holdingRegisters[1329] = (uint16_t)(tmp >> 48 ) & 0xFFFF;
+    // Single-phase: all power on L1, zero L2/L3
+    int32_t se_papp = (int32_t)(tmp > 0x7FFFFFFF ? 0x7FFFFFFF : (int32_t)tmp);
+    seWriteInt32(SE_PAPP_REG,  se_papp);
+    seWriteInt32(SE_PAPP1_REG, se_papp);
+    seWriteInt32(SE_PAPP2_REG, 0);
+    seWriteInt32(SE_PAPP3_REG, 0);
     Serial.print("PAPP : ");
     Serial.println(tmp);
   }else if (memcmp(au8Command,"PTEC",4)==0)
@@ -664,6 +695,7 @@ bool bDataProcessingStandard(char *au8Command,char *au8Value, uint8_t au8Pos)
     uint16_t tmp = atoi(au8Value);
 
     holdingRegisters[1320] = (uint16_t)tmp & 0xFFFF;
+    seWriteInt32(SE_IRMS1_REG, (int32_t)tmp * 1000);
 
     Serial.print("IRMS1 : ");
     Serial.println(tmp);
@@ -673,6 +705,7 @@ bool bDataProcessingStandard(char *au8Command,char *au8Value, uint8_t au8Pos)
     uint16_t tmp = atoi(au8Value);
 
     holdingRegisters[1321] = (uint16_t)tmp & 0xFFFF;
+    seWriteInt32(SE_IRMS2_REG, (int32_t)tmp * 1000);
 
     Serial.print("IRMS2 : ");
     Serial.println(tmp);
@@ -682,6 +715,7 @@ bool bDataProcessingStandard(char *au8Command,char *au8Value, uint8_t au8Pos)
     uint16_t tmp = atoi(au8Value);
 
     holdingRegisters[1322] = (uint16_t)tmp & 0xFFFF;
+    seWriteInt32(SE_IRMS3_REG, (int32_t)tmp * 1000);
 
     Serial.print("IRMS3 : ");
     Serial.println(tmp);
@@ -691,6 +725,7 @@ bool bDataProcessingStandard(char *au8Command,char *au8Value, uint8_t au8Pos)
     uint16_t tmp = atoi(au8Value);
 
     holdingRegisters[1323] = (uint16_t)tmp & 0xFFFF;
+    seWriteInt32(SE_URMS1_REG, (int32_t)tmp * 10);
 
     Serial.print("URMS1 : ");
     Serial.println(tmp);
@@ -700,6 +735,7 @@ bool bDataProcessingStandard(char *au8Command,char *au8Value, uint8_t au8Pos)
     uint16_t tmp = atoi(au8Value);
 
     holdingRegisters[1324] = (uint16_t)tmp & 0xFFFF;
+    seWriteInt32(SE_URMS2_REG, (int32_t)tmp * 10);
 
     Serial.print("URMS2 : ");
     Serial.println(tmp);
@@ -709,6 +745,7 @@ bool bDataProcessingStandard(char *au8Command,char *au8Value, uint8_t au8Pos)
     uint16_t tmp = atoi(au8Value);
 
     holdingRegisters[1325] = (uint16_t)tmp & 0xFFFF;
+    seWriteInt32(SE_URMS3_REG, (int32_t)tmp * 10);
 
     Serial.print("URMS3 : ");
     Serial.println(tmp);
@@ -877,48 +914,52 @@ bool bDataProcessingStandard(char *au8Command,char *au8Value, uint8_t au8Pos)
 
   }else if (memcmp(au8Command,"SINSTS1",7)==0)
   {
-    long long tmp = strtoull(au8Value,NULL,10);  
+    long long tmp = strtoull(au8Value,NULL,10);
 
     holdingRegisters[1332] = (uint16_t)tmp & 0xFFFF;
     holdingRegisters[1331] = (uint16_t)(tmp >> 16 ) & 0xFFFF;
     holdingRegisters[1330] = (uint16_t)(tmp >> 32 ) & 0xFFFF;
     holdingRegisters[1329] = (uint16_t)(tmp >> 48 ) & 0xFFFF;
+    seWriteInt32(SE_PAPP1_REG, (int32_t)(tmp > 0x7FFFFFFF ? 0x7FFFFFFF : (int32_t)tmp));
 
     Serial.print("SINSTS1 : ");
     Serial.println(tmp);
 
   }else if (memcmp(au8Command,"SINSTS2",7)==0)
   {
-    long long tmp = strtoull(au8Value,NULL,10);  
+    long long tmp = strtoull(au8Value,NULL,10);
 
     holdingRegisters[1336] = (uint16_t)tmp & 0xFFFF;
     holdingRegisters[1335] = (uint16_t)(tmp >> 16 ) & 0xFFFF;
     holdingRegisters[1334] = (uint16_t)(tmp >> 32 ) & 0xFFFF;
     holdingRegisters[1333] = (uint16_t)(tmp >> 48 ) & 0xFFFF;
+    seWriteInt32(SE_PAPP2_REG, (int32_t)(tmp > 0x7FFFFFFF ? 0x7FFFFFFF : (int32_t)tmp));
 
     Serial.print("SINSTS2 : ");
     Serial.println(tmp);
 
   }else if (memcmp(au8Command,"SINSTS3",7)==0)
   {
-    long long tmp = strtoull(au8Value,NULL,10);  
+    long long tmp = strtoull(au8Value,NULL,10);
 
     holdingRegisters[1340] = (uint16_t)tmp & 0xFFFF;
     holdingRegisters[1339] = (uint16_t)(tmp >> 16 ) & 0xFFFF;
     holdingRegisters[1338] = (uint16_t)(tmp >> 32 ) & 0xFFFF;
     holdingRegisters[1337] = (uint16_t)(tmp >> 48 ) & 0xFFFF;
+    seWriteInt32(SE_PAPP3_REG, (int32_t)(tmp > 0x7FFFFFFF ? 0x7FFFFFFF : (int32_t)tmp));
 
     Serial.print("SINSTS3 : ");
     Serial.println(tmp);
 
   }else if (memcmp(au8Command,"SINSTS",6)==0)
   {
-    long long tmp = strtoull(au8Value,NULL,10);  
+    long long tmp = strtoull(au8Value,NULL,10);
 
     holdingRegisters[1344] = (uint16_t)tmp & 0xFFFF;
     holdingRegisters[1343] = (uint16_t)(tmp >> 16 ) & 0xFFFF;
     holdingRegisters[1342] = (uint16_t)(tmp >> 32 ) & 0xFFFF;
     holdingRegisters[1341] = (uint16_t)(tmp >> 48 ) & 0xFFFF;
+    seWriteInt32(SE_PAPP_REG, (int32_t)(tmp > 0x7FFFFFFF ? 0x7FFFFFFF : (int32_t)tmp));
 
     Serial.print("SINSTS : ");
     Serial.println(tmp);

@@ -404,7 +404,7 @@ bool loadConfigModbus()
   File configFile = LittleFS.open(path, FILE_READ);
   if (!configFile) {
     Serial.print(F("failed open"));
-    ConfigSettings.modbus_id = 1;
+    ConfigSettings.modbus_id = 11;
     strlcpy(ConfigSettings.modbus_bauds,"9600", sizeof(ConfigSettings.modbus_bauds));
     strlcpy(ConfigSettings.modbus_parity,"None", sizeof(ConfigSettings.modbus_parity));
     configFile.close();
@@ -419,7 +419,7 @@ bool loadConfigModbus()
   {
     ConfigSettings.modbus_id = (int)doc["modbus_id"];
   }else{
-    ConfigSettings.modbus_id = 1;
+    ConfigSettings.modbus_id = 11;
   }
 
   strlcpy(ConfigSettings.modbus_bauds, doc["modbus_bauds"] | "9600", sizeof(ConfigSettings.modbus_bauds));
