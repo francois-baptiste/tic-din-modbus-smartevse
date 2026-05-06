@@ -34,14 +34,25 @@ static void seWriteInt32(uint16_t reg, int32_t value) {
     holdingRegisters[reg + 1] = (uint16_t)(value & 0xFFFF);
 }
 
-// High-precision current derived from SINSTS/PAPP ÷ URMS1
-// Option A — reg 20-21: IEEE 754 float32, big-endian (A)
-// Option B — reg 22:    UInt16 × 100, centi-amps (e.g. 1542 = 15.42 A)
-#define SE_PRECISE_I_FLOAT_REG  20  // 2 registers: 20-21
-#define SE_PRECISE_I_U16_REG    22  // 1 register
+// High-precision current registers — total and per-phase
+// Each slot: [float_reg, float_reg+1] = Float32 big-endian (A)  Option A
+//            [u16_reg]                = UInt16 × 100 (cA)       Option B
+#define SE_PRECISE_I_FLOAT_REG   20  // total: regs 20-21
+#define SE_PRECISE_I_U16_REG     22
+#define SE_PRECISE_I1_FLOAT_REG  23  // L1:    regs 23-24
+#define SE_PRECISE_I1_U16_REG    25
+#define SE_PRECISE_I2_FLOAT_REG  26  // L2:    regs 26-27
+#define SE_PRECISE_I2_U16_REG    28
+#define SE_PRECISE_I3_FLOAT_REG  29  // L3:    regs 29-30
+#define SE_PRECISE_I3_U16_REG    31
 
-static uint32_t s_sinsts_va = 0;    // last apparent power in VA (from SINSTS or PAPP)
-static uint16_t s_urms1_v   = 230;  // last L1 voltage in V (default 230 V if not yet received)
+static uint32_t s_sinsts_va  = 0;    // total apparent power (SINSTS / PAPP)
+static uint32_t s_sinsts1_va = 0;    // L1 apparent power (SINSTS1)
+static uint32_t s_sinsts2_va = 0;    // L2 apparent power (SINSTS2)
+static uint32_t s_sinsts3_va = 0;    // L3 apparent power (SINSTS3)
+static uint16_t s_urms1_v    = 230;  // L1 voltage in V (default 230 V)
+static uint16_t s_urms2_v    = 230;  // L2 voltage in V (default 230 V)
+static uint16_t s_urms3_v    = 230;  // L3 voltage in V (default 230 V)
 
 static void seWriteFloat32(uint16_t reg, float value) {
     uint32_t bits;
@@ -50,12 +61,17 @@ static void seWriteFloat32(uint16_t reg, float value) {
     holdingRegisters[reg + 1] = (uint16_t)(bits & 0xFFFF);
 }
 
-static void seUpdatePreciseCurrent() {
-    float denom = (s_urms1_v > 0) ? (float)s_urms1_v : 230.0f;
-    float precise_a = (float)s_sinsts_va / denom;
-    seWriteFloat32(SE_PRECISE_I_FLOAT_REG, precise_a);
-    holdingRegisters[SE_PRECISE_I_U16_REG] = (uint16_t)(precise_a * 100.0f + 0.5f);
+static void seWritePreciseCurrent(uint16_t float_reg, uint16_t u16_reg, uint32_t sinsts_va, uint16_t urms_v) {
+    float denom = (urms_v > 0) ? (float)urms_v : 230.0f;
+    float a = (float)sinsts_va / denom;
+    seWriteFloat32(float_reg, a);
+    holdingRegisters[u16_reg] = (uint16_t)(a * 100.0f + 0.5f);
 }
+
+static void seUpdatePreciseCurrent()   { seWritePreciseCurrent(SE_PRECISE_I_FLOAT_REG,  SE_PRECISE_I_U16_REG,  s_sinsts_va,  s_urms1_v); }
+static void seUpdatePreciseCurrentL1() { seWritePreciseCurrent(SE_PRECISE_I1_FLOAT_REG, SE_PRECISE_I1_U16_REG, s_sinsts1_va, s_urms1_v); }
+static void seUpdatePreciseCurrentL2() { seWritePreciseCurrent(SE_PRECISE_I2_FLOAT_REG, SE_PRECISE_I2_U16_REG, s_sinsts2_va, s_urms2_v); }
+static void seUpdatePreciseCurrentL3() { seWritePreciseCurrent(SE_PRECISE_I3_FLOAT_REG, SE_PRECISE_I3_U16_REG, s_sinsts3_va, s_urms3_v); }
 
 bool bDataProcessingHisto(char *au8Command,char *au8Value, uint8_t au8Pos)
 {
@@ -754,6 +770,7 @@ bool bDataProcessingStandard(char *au8Command,char *au8Value, uint8_t au8Pos)
     seWriteInt32(SE_URMS1_REG, (int32_t)tmp * 10);
     s_urms1_v = tmp;
     seUpdatePreciseCurrent();
+    seUpdatePreciseCurrentL1();
 
     Serial.print("URMS1 : ");
     Serial.println(tmp);
@@ -764,6 +781,8 @@ bool bDataProcessingStandard(char *au8Command,char *au8Value, uint8_t au8Pos)
 
     holdingRegisters[1324] = (uint16_t)tmp & 0xFFFF;
     seWriteInt32(SE_URMS2_REG, (int32_t)tmp * 10);
+    s_urms2_v = tmp;
+    seUpdatePreciseCurrentL2();
 
     Serial.print("URMS2 : ");
     Serial.println(tmp);
@@ -774,6 +793,8 @@ bool bDataProcessingStandard(char *au8Command,char *au8Value, uint8_t au8Pos)
 
     holdingRegisters[1325] = (uint16_t)tmp & 0xFFFF;
     seWriteInt32(SE_URMS3_REG, (int32_t)tmp * 10);
+    s_urms3_v = tmp;
+    seUpdatePreciseCurrentL3();
 
     Serial.print("URMS3 : ");
     Serial.println(tmp);
@@ -949,6 +970,8 @@ bool bDataProcessingStandard(char *au8Command,char *au8Value, uint8_t au8Pos)
     holdingRegisters[1330] = (uint16_t)(tmp >> 32 ) & 0xFFFF;
     holdingRegisters[1329] = (uint16_t)(tmp >> 48 ) & 0xFFFF;
     seWriteInt32(SE_PAPP1_REG, (int32_t)(tmp > 0x7FFFFFFF ? 0x7FFFFFFF : (int32_t)tmp));
+    s_sinsts1_va = (uint32_t)(tmp > 0xFFFFFFFF ? 0xFFFFFFFF : (uint32_t)tmp);
+    seUpdatePreciseCurrentL1();
 
     Serial.print("SINSTS1 : ");
     Serial.println(tmp);
@@ -962,6 +985,8 @@ bool bDataProcessingStandard(char *au8Command,char *au8Value, uint8_t au8Pos)
     holdingRegisters[1334] = (uint16_t)(tmp >> 32 ) & 0xFFFF;
     holdingRegisters[1333] = (uint16_t)(tmp >> 48 ) & 0xFFFF;
     seWriteInt32(SE_PAPP2_REG, (int32_t)(tmp > 0x7FFFFFFF ? 0x7FFFFFFF : (int32_t)tmp));
+    s_sinsts2_va = (uint32_t)(tmp > 0xFFFFFFFF ? 0xFFFFFFFF : (uint32_t)tmp);
+    seUpdatePreciseCurrentL2();
 
     Serial.print("SINSTS2 : ");
     Serial.println(tmp);
@@ -975,6 +1000,8 @@ bool bDataProcessingStandard(char *au8Command,char *au8Value, uint8_t au8Pos)
     holdingRegisters[1338] = (uint16_t)(tmp >> 32 ) & 0xFFFF;
     holdingRegisters[1337] = (uint16_t)(tmp >> 48 ) & 0xFFFF;
     seWriteInt32(SE_PAPP3_REG, (int32_t)(tmp > 0x7FFFFFFF ? 0x7FFFFFFF : (int32_t)tmp));
+    s_sinsts3_va = (uint32_t)(tmp > 0xFFFFFFFF ? 0xFFFFFFFF : (uint32_t)tmp);
+    seUpdatePreciseCurrentL3();
 
     Serial.print("SINSTS3 : ");
     Serial.println(tmp);
