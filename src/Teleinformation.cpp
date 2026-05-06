@@ -34,6 +34,29 @@ static void seWriteInt32(uint16_t reg, int32_t value) {
     holdingRegisters[reg + 1] = (uint16_t)(value & 0xFFFF);
 }
 
+// High-precision current derived from SINSTS/PAPP ÷ URMS1
+// Option A — reg 20-21: IEEE 754 float32, big-endian (A)
+// Option B — reg 22:    UInt16 × 100, centi-amps (e.g. 1542 = 15.42 A)
+#define SE_PRECISE_I_FLOAT_REG  20  // 2 registers: 20-21
+#define SE_PRECISE_I_U16_REG    22  // 1 register
+
+static uint32_t s_sinsts_va = 0;    // last apparent power in VA (from SINSTS or PAPP)
+static uint16_t s_urms1_v   = 230;  // last L1 voltage in V (default 230 V if not yet received)
+
+static void seWriteFloat32(uint16_t reg, float value) {
+    uint32_t bits;
+    memcpy(&bits, &value, 4);
+    holdingRegisters[reg]     = (uint16_t)(bits >> 16);
+    holdingRegisters[reg + 1] = (uint16_t)(bits & 0xFFFF);
+}
+
+static void seUpdatePreciseCurrent() {
+    float denom = (s_urms1_v > 0) ? (float)s_urms1_v : 230.0f;
+    float precise_a = (float)s_sinsts_va / denom;
+    seWriteFloat32(SE_PRECISE_I_FLOAT_REG, precise_a);
+    holdingRegisters[SE_PRECISE_I_U16_REG] = (uint16_t)(precise_a * 100.0f + 0.5f);
+}
+
 bool bDataProcessingHisto(char *au8Command,char *au8Value, uint8_t au8Pos)
 {
   if (memcmp(au8Command,"ADCO",4)==0)
@@ -274,6 +297,9 @@ bool bDataProcessingHisto(char *au8Command,char *au8Value, uint8_t au8Pos)
     seWriteInt32(SE_PAPP1_REG, se_papp);
     seWriteInt32(SE_PAPP2_REG, 0);
     seWriteInt32(SE_PAPP3_REG, 0);
+    // Historic meters have no URMS1; s_urms1_v stays at its default (230 V)
+    s_sinsts_va = (uint32_t)(tmp > 0xFFFFFFFF ? 0xFFFFFFFF : (uint32_t)tmp);
+    seUpdatePreciseCurrent();
     Serial.print("PAPP : ");
     Serial.println(tmp);
   }else if (memcmp(au8Command,"PTEC",4)==0)
@@ -726,6 +752,8 @@ bool bDataProcessingStandard(char *au8Command,char *au8Value, uint8_t au8Pos)
 
     holdingRegisters[1323] = (uint16_t)tmp & 0xFFFF;
     seWriteInt32(SE_URMS1_REG, (int32_t)tmp * 10);
+    s_urms1_v = tmp;
+    seUpdatePreciseCurrent();
 
     Serial.print("URMS1 : ");
     Serial.println(tmp);
@@ -960,6 +988,8 @@ bool bDataProcessingStandard(char *au8Command,char *au8Value, uint8_t au8Pos)
     holdingRegisters[1342] = (uint16_t)(tmp >> 32 ) & 0xFFFF;
     holdingRegisters[1341] = (uint16_t)(tmp >> 48 ) & 0xFFFF;
     seWriteInt32(SE_PAPP_REG, (int32_t)(tmp > 0x7FFFFFFF ? 0x7FFFFFFF : (int32_t)tmp));
+    s_sinsts_va = (uint32_t)(tmp > 0xFFFFFFFF ? 0xFFFFFFFF : (uint32_t)tmp);
+    seUpdatePreciseCurrent();
 
     Serial.print("SINSTS : ");
     Serial.println(tmp);
