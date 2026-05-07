@@ -595,6 +595,41 @@ void handleStatusNetwork(AsyncWebServerRequest *request)
   }
   mapping+=String(tmp);
   mapping +="</td></tr>";
+  mapping +="<tr><td><Strong>1200-1203 : </strong></td><td>";
+  tmp=0;
+  for (size_t i = 0; i < 4; ++i) {
+      tmp |= ((unsigned long long)holdingRegisters[1203-i] << (i * 16));
+  }
+  mapping+=String(tmp);
+  mapping +="</td></tr>";
+  mapping +="<tr><td><Strong>1300-1303 : </strong></td><td>";
+  tmp=0;
+  for (size_t i = 0; i < 4; ++i) {
+      tmp |= ((unsigned long long)holdingRegisters[1303-i] << (i * 16));
+  }
+  mapping+=String(tmp);
+  mapping +="</td></tr>";
+  mapping +="<tr><td><Strong>1304-1307 : </strong></td><td>";
+  tmp=0;
+  for (size_t i = 0; i < 4; ++i) {
+      tmp |= ((unsigned long long)holdingRegisters[1307-i] << (i * 16));
+  }
+  mapping+=String(tmp);
+  mapping +="</td></tr>";
+  mapping +="<tr><td><Strong>1308-1311 : </strong></td><td>";
+  tmp=0;
+  for (size_t i = 0; i < 4; ++i) {
+      tmp |= ((unsigned long long)holdingRegisters[1311-i] << (i * 16));
+  }
+  mapping+=String(tmp);
+  mapping +="</td></tr>";
+  mapping +="<tr><td><Strong>1312-1315 : </strong></td><td>";
+  tmp=0;
+  for (size_t i = 0; i < 4; ++i) {
+      tmp |= ((unsigned long long)holdingRegisters[1315-i] << (i * 16));
+  }
+  mapping+=String(tmp);
+  mapping +="</td></tr>";
   mapping +="<tr><td><Strong>1320 : </strong></td><td>";
    tmp = (unsigned long long)holdingRegisters[1320];
   mapping+=String(tmp);
@@ -664,6 +699,97 @@ void handleStatusNetwork(AsyncWebServerRequest *request)
    tmp=0;
   for (size_t i = 0; i < 4; ++i) {
       tmp |= ((unsigned long long)holdingRegisters[1344-i] << (i * 16));
+  }
+  mapping+=String(tmp);
+  mapping +="</td></tr>";
+  mapping +="<tr><td><Strong>1345-1348 : </strong></td><td>";
+  tmp=0;
+  for (size_t i = 0; i < 4; ++i) {
+      tmp |= ((unsigned long long)holdingRegisters[1348-i] << (i * 16));
+  }
+  mapping+=String(tmp);
+  mapping +="</td></tr>";
+  mapping +="<tr><td><Strong>1353-1356 : </strong></td><td>";
+  tmp=0;
+  for (size_t i = 0; i < 4; ++i) {
+      tmp |= ((unsigned long long)holdingRegisters[1356-i] << (i * 16));
+  }
+  mapping+=String(tmp);
+  mapping +="</td></tr>";
+  mapping +="<tr><td><Strong>1357-1360 : </strong></td><td>";
+  tmp=0;
+  for (size_t i = 0; i < 4; ++i) {
+      tmp |= ((unsigned long long)holdingRegisters[1360-i] << (i * 16));
+  }
+  mapping+=String(tmp);
+  mapping +="</td></tr>";
+  mapping +="<tr><td><Strong>1361-1364 : </strong></td><td>";
+  tmp=0;
+  for (size_t i = 0; i < 4; ++i) {
+      tmp |= ((unsigned long long)holdingRegisters[1364-i] << (i * 16));
+  }
+  mapping+=String(tmp);
+  mapping +="</td></tr>";
+  mapping +="<tr><td><Strong>1365-1368 : </strong></td><td>";
+  tmp=0;
+  for (size_t i = 0; i < 4; ++i) {
+      tmp |= ((unsigned long long)holdingRegisters[1368-i] << (i * 16));
+  }
+  mapping+=String(tmp);
+  mapping +="</td></tr>";
+  mapping +="<tr><td><Strong>1369-1372 : </strong></td><td>";
+  tmp=0;
+  for (size_t i = 0; i < 4; ++i) {
+      tmp |= ((unsigned long long)holdingRegisters[1372-i] << (i * 16));
+  }
+  mapping+=String(tmp);
+  mapping +="</td></tr>";
+  mapping +="<tr><td><Strong>1400-1403 : </strong></td><td>";
+  tmp=0;
+  for (size_t i = 0; i < 4; ++i) {
+      tmp |= ((unsigned long long)holdingRegisters[1403-i] << (i * 16));
+  }
+  mapping+=String(tmp);
+  mapping +="</td></tr>";
+  mapping +="<tr><td><Strong>1404-1407 : </strong></td><td>";
+  tmp=0;
+  for (size_t i = 0; i < 4; ++i) {
+      tmp |= ((unsigned long long)holdingRegisters[1407-i] << (i * 16));
+  }
+  mapping+=String(tmp);
+  mapping +="</td></tr>";
+  mapping +="<tr><td><Strong>1408-1411 : </strong></td><td>";
+  tmp=0;
+  for (size_t i = 0; i < 4; ++i) {
+      tmp |= ((unsigned long long)holdingRegisters[1411-i] << (i * 16));
+  }
+  mapping+=String(tmp);
+  mapping +="</td></tr>";
+  mapping +="<tr><td><Strong>1412-1415 : </strong></td><td>";
+  tmp=0;
+  for (size_t i = 0; i < 4; ++i) {
+      tmp |= ((unsigned long long)holdingRegisters[1415-i] << (i * 16));
+  }
+  mapping+=String(tmp);
+  mapping +="</td></tr>";
+  mapping +="<tr><td><Strong>1416-1419 : </strong></td><td>";
+  tmp=0;
+  for (size_t i = 0; i < 4; ++i) {
+      tmp |= ((unsigned long long)holdingRegisters[1419-i] << (i * 16));
+  }
+  mapping+=String(tmp);
+  mapping +="</td></tr>";
+  mapping +="<tr><td><Strong>1500-1503 : </strong></td><td>";
+  tmp=0;
+  for (size_t i = 0; i < 4; ++i) {
+      tmp |= ((unsigned long long)holdingRegisters[1503-i] << (i * 16));
+  }
+  mapping+=String(tmp);
+  mapping +="</td></tr>";
+  mapping +="<tr><td><Strong>1504-1507 : </strong></td><td>";
+  tmp=0;
+  for (size_t i = 0; i < 4; ++i) {
+      tmp |= ((unsigned long long)holdingRegisters[1507-i] << (i * 16));
   }
   mapping+=String(tmp);
   mapping +="</td></tr>";
