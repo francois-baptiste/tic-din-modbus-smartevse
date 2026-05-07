@@ -388,484 +388,157 @@ void handleNotFound(AsyncWebServerRequest *request)
 
 void handleStatusNetwork(AsyncWebServerRequest *request)
 {
-  String result;
-  result += F("<html>");
-  result += FPSTR(HTTP_HEADER);
-  result += FPSTR(HTTP_MENU);
-  result += FPSTR(HTTP_NETWORK);
-  result += FPSTR(HTTP_FOOTER);
-  result += F("</html>");
+  AsyncResponseStream *response = request->beginResponseStream("text/html");
 
-  if (ConfigSettings.enableWiFi)
-  {
-    result.replace("{{enableWifi}}", F("<img src='/web/img/ok.png'>"));
-  }
-  else
-  {
-    result.replace("{{enableWifi}}", F("<img src='/web/img/nok.png'>"));
-  }
-  result.replace("{{ssidWifi}}", String(ConfigSettings.ssid));
-  result.replace("{{modbus_id}}", String(ConfigSettings.modbus_id));
-  result.replace("{{modbus_bauds}}", String(ConfigSettings.modbus_bauds));
-  result.replace("{{modbus_parity}}", String(ConfigSettings.modbus_parity));
+  // Page shell
+  response->print(F("<html>"));
+  response->print(FPSTR(HTTP_HEADER));
+  response->print(FPSTR(HTTP_MENU));
 
+  // WiFi card
+  response->print(F("<h1>Network status</h1>"));
+  response->print(F("<div class='row' style='--bs-gutter-x: 0.3rem;'><div class='col-sm-3'><div class='card'><div class='card-header'>WiFi Status</div><div class='card-body'><div id='wifiConfig'>"));
+  response->print(F("<strong>Enable : </strong>"));
+  response->print(ConfigSettings.enableWiFi ? F("<img src='/web/img/ok.png'>") : F("<img src='/web/img/nok.png'>"));
+  response->printf("<br><strong>SSID : </strong>%s", ConfigSettings.ssid);
+  response->print(F("</div></div></div></div></div>"));
 
-  if (ConfigSettings.connectedWifiSta)
-  {
-    result.replace("{{connectedWifi}}", F("<img src='/web/img/ok.png'>"));
-  }
-  else
-  {
-    result.replace("{{connectedWifi}}", F("<img src='/web/img/nok.png'>"));
-  }
-  
-  float temperature = 0;
-  temperature = temperatureReadFixed();
-  result.replace("{{Temperature}}", String(temperature)); 
+  // Modbus card
+  response->print(F("<div class='row' style='--bs-gutter-x: 0.3rem;'><div class='col-sm-3'><div class='card'><div class='card-header'>Modbus Status</div><div class='card-body'><i>Connexion :</i><br>"));
+  response->printf("<strong>ID : </strong> %d<br><strong>Bauds :</strong> %s<br><strong>Data bits :</strong> 8<br><strong>Stop Bits :</strong> 1<br><strong>Parity :</strong> %s<br>",
+    ConfigSettings.modbus_id, ConfigSettings.modbus_bauds, ConfigSettings.modbus_parity);
+  response->print(F("</div></div></div></div>"));
 
-  String mapping;
+  // System info card
+  response->print(F("<div class='row' style='--bs-gutter-x: 0.3rem;'><div class='row' style='--bs-gutter-x: 0.3rem;'><div class='col-sm-3'><div class='card'><div class='card-header'>System Infos</div><div class='card-body'><i>System :</i><br>"));
+  response->printf("<strong>Device temperature :</strong> %.1f &deg;C<br>", (double)temperatureReadFixed());
+  response->print(F("</div></div></div></div>"));
+
+  // Modbus mapping table — streamed row by row, no large String accumulation
+  response->print(F("<h1>ModBus Infos</h1><div class='col-sm-3'><div class='card'><div class='card-header'>Mapping table</div><div class='card-body'>"));
+  response->print(F("<table><tr><td><strong>Registry</strong></td><td><strong>Value</strong></td></tr>"));
+
+  // Row helpers (lambdas capture response by reference)
+  auto rowI32 = [&](const char* lbl, uint16_t base) {
+    int32_t v = (int32_t)(((uint32_t)holdingRegisters[base] << 16) | holdingRegisters[base + 1]);
+    response->printf("<tr><td><strong>%s</strong></td><td>%d</td></tr>", lbl, (int)v);
+  };
+  auto rowF32 = [&](const char* lbl, uint16_t base) {
+    uint32_t bits = ((uint32_t)holdingRegisters[base] << 16) | holdingRegisters[base + 1];
+    float f; memcpy(&f, &bits, 4);
+    response->printf("<tr><td><strong>%s</strong></td><td>%.2f A</td></tr>", lbl, (double)f);
+  };
+  auto rowU16 = [&](const char* lbl, uint16_t reg) {
+    response->printf("<tr><td><strong>%s</strong></td><td>%u</td></tr>", lbl, (unsigned)holdingRegisters[reg]);
+  };
+  auto rowU64 = [&](const char* lbl, uint16_t top) {
+    uint64_t v = 0;
+    for (int i = 0; i < 4; i++) v |= ((uint64_t)holdingRegisters[top - i] << (i * 16));
+    response->printf("<tr><td><strong>%s</strong></td><td>%llu</td></tr>", lbl, (unsigned long long)v);
+  };
+  auto rowStr = [&](const char* lbl, uint16_t base, uint16_t len) {
+    response->printf("<tr><td><strong>%s</strong></td><td>", lbl);
+    for (int i = 0; i < len; i++) { char c = (char)(holdingRegisters[base + i] & 0xFF); if (c) response->write((uint8_t)c); }
+    response->print(F("</td></tr>"));
+  };
+
+  // SmartEVSE Custom Meter (regs 0-31)
+  response->print(F("<tr><td colspan='2'><strong>&mdash; SmartEVSE Custom Meter (regs 0-31) &mdash;</strong></td></tr>"));
+  rowI32("0-1 IRMS1 (mA) :", 0);
+  rowI32("2-3 IRMS2 (mA) :", 2);
+  rowI32("4-5 IRMS3 (mA) :", 4);
+  rowI32("6-7 URMS1 (V\xc3\x97""10) :", 6);
+  rowI32("8-9 URMS2 (V\xc3\x97""10) :", 8);
+  rowI32("10-11 URMS3 (V\xc3\x97""10) :", 10);
+  rowI32("12-13 PAPP (VA) :", 12);
+  rowI32("14-15 PAPP1 (VA) :", 14);
+  rowI32("16-17 PAPP2 (VA) :", 16);
+  rowI32("18-19 PAPP3 (VA) :", 18);
+  rowF32("20-21 I total (FLOAT32) :", 20);
+  rowU16("22 I total (A\xc3\x97""100) :", 22);
+  rowF32("23-24 I L1 (FLOAT32) :", 23);
+  rowU16("25 I L1 (A\xc3\x97""100) :", 25);
+  rowF32("26-27 I L2 (FLOAT32) :", 26);
+  rowU16("28 I L2 (A\xc3\x97""100) :", 28);
+  rowF32("29-30 I L3 (FLOAT32) :", 29);
+  rowU16("31 I L3 (A\xc3\x97""100) :", 31);
+
+  // TIC Modbus Mapping
+  response->print(F("<tr><td colspan='2'><strong>&mdash; TIC Modbus Mapping &mdash;</strong></td></tr>"));
+  // Note: reusing tmp variable below for legacy string rows
   long long tmp;
-  mapping +="<table>";
-  mapping +="<tr><td><strong>Registry</strong></td><td><strong>Value</strong></td></tr>";
-  mapping +="<tr><td colspan='2'><strong>&mdash; SmartEVSE Custom Meter (regs 0-31) &mdash;</strong></td></tr>";
-  { int32_t v=(int32_t)(((uint32_t)holdingRegisters[0]<<16)|holdingRegisters[1]);
-    mapping +="<tr><td><Strong>0-1 IRMS1 (mA) : </Strong></td><td>"; mapping+=String(v); mapping+="</td></tr>"; }
-  { int32_t v=(int32_t)(((uint32_t)holdingRegisters[2]<<16)|holdingRegisters[3]);
-    mapping +="<tr><td><Strong>2-3 IRMS2 (mA) : </Strong></td><td>"; mapping+=String(v); mapping+="</td></tr>"; }
-  { int32_t v=(int32_t)(((uint32_t)holdingRegisters[4]<<16)|holdingRegisters[5]);
-    mapping +="<tr><td><Strong>4-5 IRMS3 (mA) : </Strong></td><td>"; mapping+=String(v); mapping+="</td></tr>"; }
-  { int32_t v=(int32_t)(((uint32_t)holdingRegisters[6]<<16)|holdingRegisters[7]);
-    mapping +="<tr><td><Strong>6-7 URMS1 (V\xc3\x97""10) : </Strong></td><td>"; mapping+=String(v); mapping+="</td></tr>"; }
-  { int32_t v=(int32_t)(((uint32_t)holdingRegisters[8]<<16)|holdingRegisters[9]);
-    mapping +="<tr><td><Strong>8-9 URMS2 (V\xc3\x97""10) : </Strong></td><td>"; mapping+=String(v); mapping+="</td></tr>"; }
-  { int32_t v=(int32_t)(((uint32_t)holdingRegisters[10]<<16)|holdingRegisters[11]);
-    mapping +="<tr><td><Strong>10-11 URMS3 (V\xc3\x97""10) : </Strong></td><td>"; mapping+=String(v); mapping+="</td></tr>"; }
-  { int32_t v=(int32_t)(((uint32_t)holdingRegisters[12]<<16)|holdingRegisters[13]);
-    mapping +="<tr><td><Strong>12-13 PAPP (VA) : </Strong></td><td>"; mapping+=String(v); mapping+="</td></tr>"; }
-  { int32_t v=(int32_t)(((uint32_t)holdingRegisters[14]<<16)|holdingRegisters[15]);
-    mapping +="<tr><td><Strong>14-15 PAPP1 (VA) : </Strong></td><td>"; mapping+=String(v); mapping+="</td></tr>"; }
-  { int32_t v=(int32_t)(((uint32_t)holdingRegisters[16]<<16)|holdingRegisters[17]);
-    mapping +="<tr><td><Strong>16-17 PAPP2 (VA) : </Strong></td><td>"; mapping+=String(v); mapping+="</td></tr>"; }
-  { int32_t v=(int32_t)(((uint32_t)holdingRegisters[18]<<16)|holdingRegisters[19]);
-    mapping +="<tr><td><Strong>18-19 PAPP3 (VA) : </Strong></td><td>"; mapping+=String(v); mapping+="</td></tr>"; }
-  { uint32_t b=((uint32_t)holdingRegisters[20]<<16)|holdingRegisters[21]; float f; memcpy(&f,&b,4);
-    mapping +="<tr><td><Strong>20-21 I total (A, FLOAT32) : </Strong></td><td>"; mapping+=String(f,2); mapping+=" A</td></tr>"; }
-  { mapping +="<tr><td><Strong>22 I total (A\xc3\x97""100) : </Strong></td><td>"; mapping+=String(holdingRegisters[22]); mapping+="</td></tr>"; }
-  { uint32_t b=((uint32_t)holdingRegisters[23]<<16)|holdingRegisters[24]; float f; memcpy(&f,&b,4);
-    mapping +="<tr><td><Strong>23-24 I L1 (A, FLOAT32) : </Strong></td><td>"; mapping+=String(f,2); mapping+=" A</td></tr>"; }
-  { mapping +="<tr><td><Strong>25 I L1 (A\xc3\x97""100) : </Strong></td><td>"; mapping+=String(holdingRegisters[25]); mapping+="</td></tr>"; }
-  { uint32_t b=((uint32_t)holdingRegisters[26]<<16)|holdingRegisters[27]; float f; memcpy(&f,&b,4);
-    mapping +="<tr><td><Strong>26-27 I L2 (A, FLOAT32) : </Strong></td><td>"; mapping+=String(f,2); mapping+=" A</td></tr>"; }
-  { mapping +="<tr><td><Strong>28 I L2 (A\xc3\x97""100) : </Strong></td><td>"; mapping+=String(holdingRegisters[28]); mapping+="</td></tr>"; }
-  { uint32_t b=((uint32_t)holdingRegisters[29]<<16)|holdingRegisters[30]; float f; memcpy(&f,&b,4);
-    mapping +="<tr><td><Strong>29-30 I L3 (A, FLOAT32) : </Strong></td><td>"; mapping+=String(f,2); mapping+=" A</td></tr>"; }
-  { mapping +="<tr><td><Strong>31 I L3 (A\xc3\x97""100) : </Strong></td><td>"; mapping+=String(holdingRegisters[31]); mapping+="</td></tr>"; }
-  mapping +="<tr><td colspan='2'><strong>&mdash; TIC Modbus Mapping &mdash;</strong></td></tr>";
-  mapping +="<tr><td><Strong>300-303 : </Strong></td><td>";
-  for (size_t i = 0; i < 4; ++i) {
-      tmp |= ((unsigned long long)holdingRegisters[303-i] << (i * 16));
-  }
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>2000-2099 : </strong></td><td>";
-  tmp=0;
-  for (size_t i = 0; i < 50; ++i) {
-      mapping+=String(static_cast<char>(holdingRegisters[2000+i]));
-  }
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>2100-2199 : </strong></td><td>";
-  tmp=0;
-  for (size_t i = 0; i < 50; ++i) {
-      mapping+=String(static_cast<char>(holdingRegisters[2100+i]));
-  }
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>2200-2299 : </strong></td><td>";
-  tmp=0;
-  for (size_t i = 0; i < 50; ++i) {
-      mapping+=String(static_cast<char>(holdingRegisters[2200+i]));
-  }
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>2300-2399 : </strong></td><td>";
-  tmp=0;
-  for (size_t i = 0; i < 50; ++i) {
-      mapping+=String(static_cast<char>(holdingRegisters[2300+i]));
-  }
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1000-1003 : </strong></td><td>";
-  tmp=0;
-  for (size_t i = 0; i < 4; ++i) {
-      tmp |= ((unsigned long long)holdingRegisters[1003-i] << (i * 16));
-  }
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1004-1007 : </strong></td><td>";
-  tmp=0;
-  for (size_t i = 0; i < 4; ++i) {
-      tmp |= ((unsigned long long)holdingRegisters[1007-i] << (i * 16));
-  }
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1008-1011 : </strong></td><td>";
-  tmp=0;
-  for (size_t i = 0; i < 4; ++i) {
-      tmp |= ((unsigned long long)holdingRegisters[1011-i] << (i * 16));
-  }
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1012-1015 : </strong></td><td>";
-  tmp=0;
-  for (size_t i = 0; i < 4; ++i) {
-      tmp |= ((unsigned long long)holdingRegisters[1015-i] << (i * 16));
-  }
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1016-1019 : </strong></td><td>";
-  tmp=0;
-  for (size_t i = 0; i < 4; ++i) {
-      tmp |= ((unsigned long long)holdingRegisters[1019-i] << (i * 16));
-  }
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1020-1023 : </strong></td><td>";
-  tmp=0;
-  for (size_t i = 0; i < 4; ++i) {
-      tmp |= ((unsigned long long)holdingRegisters[1023-i] << (i * 16));
-  }
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-   mapping +="<tr><td><Strong>1024-1027 : </strong></td><td>";
-   tmp=0;
-  for (size_t i = 0; i < 4; ++i) {
-      tmp |= ((unsigned long long)holdingRegisters[1027-i] << (i * 16));
-  }
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-   mapping +="<tr><td><Strong>1028-1031 : </strong></td><td>";
-   tmp=0;
-  for (size_t i = 0; i < 4; ++i) {
-      tmp |= ((unsigned long long)holdingRegisters[1031-i] << (i * 16));
-  }
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-   mapping +="<tr><td><Strong>1032-1035 : </strong></td><td>";
-   tmp=0;
-  for (size_t i = 0; i < 4; ++i) {
-      tmp |= ((unsigned long long)holdingRegisters[1035-i] << (i * 16));
-  }
-  mapping+=String(tmp);
-   mapping +="<tr><td><Strong>1036-1039 : </strong></td><td>";
-   tmp=0;
-  for (size_t i = 0; i < 4; ++i) {
-      tmp |= ((unsigned long long)holdingRegisters[1039-i] << (i * 16));
-  }
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-   mapping +="<tr><td><Strong>1040-1043 : </strong></td><td>";
-   tmp=0;
-  for (size_t i = 0; i < 4; ++i) {
-      tmp |= ((unsigned long long)holdingRegisters[1043-i] << (i * 16));
-  }
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-   mapping +="<tr><td><Strong>1100-1103 : </strong></td><td>";
-   tmp=0;
-  for (size_t i = 0; i < 4; ++i) {
-      tmp |= ((unsigned long long)holdingRegisters[1103-i] << (i * 16));
-  }
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-   mapping +="<tr><td><Strong>1104-1107 : </strong></td><td>";
-   tmp=0;
-  for (size_t i = 0; i < 4; ++i) {
-      tmp |= ((unsigned long long)holdingRegisters[1107-i] << (i * 16));
-  }
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-   mapping +="<tr><td><Strong>1108-1111 : </strong></td><td>";
-   tmp=0;
-  for (size_t i = 0; i < 4; ++i) {
-      tmp |= ((unsigned long long)holdingRegisters[1111-i] << (i * 16));
-  }
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-   mapping +="<tr><td><Strong>1112-1115 : </strong></td><td>";
-   tmp=0;
-  for (size_t i = 0; i < 4; ++i) {
-      tmp |= ((unsigned long long)holdingRegisters[1115-i] << (i * 16));
-  }
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1200-1203 : </strong></td><td>";
-  tmp=0;
-  for (size_t i = 0; i < 4; ++i) {
-      tmp |= ((unsigned long long)holdingRegisters[1203-i] << (i * 16));
-  }
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1300-1303 : </strong></td><td>";
-  tmp=0;
-  for (size_t i = 0; i < 4; ++i) {
-      tmp |= ((unsigned long long)holdingRegisters[1303-i] << (i * 16));
-  }
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1304-1307 : </strong></td><td>";
-  tmp=0;
-  for (size_t i = 0; i < 4; ++i) {
-      tmp |= ((unsigned long long)holdingRegisters[1307-i] << (i * 16));
-  }
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1308-1311 : </strong></td><td>";
-  tmp=0;
-  for (size_t i = 0; i < 4; ++i) {
-      tmp |= ((unsigned long long)holdingRegisters[1311-i] << (i * 16));
-  }
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1312-1315 : </strong></td><td>";
-  tmp=0;
-  for (size_t i = 0; i < 4; ++i) {
-      tmp |= ((unsigned long long)holdingRegisters[1315-i] << (i * 16));
-  }
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1320 : </strong></td><td>";
-   tmp = (unsigned long long)holdingRegisters[1320];
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1321 : </strong></td><td>";
-   tmp = (unsigned long long)holdingRegisters[1321];
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1322 : </strong></td><td>";
-   tmp = (unsigned long long)holdingRegisters[1322];
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1323 : </strong></td><td>";
-   tmp = (unsigned long long)holdingRegisters[1323];
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1324 : </strong></td><td>";
-   tmp = (unsigned long long)holdingRegisters[1324];
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1325 : </strong></td><td>";
-   tmp = (unsigned long long)holdingRegisters[1325];
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1398 : </strong></td><td>";
-   tmp = (unsigned long long)holdingRegisters[1398];
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-   mapping +="<tr><td><Strong>1399 : </strong></td><td>";
-   tmp = (unsigned long long)holdingRegisters[1399];
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1326 : </strong></td><td>";
-   tmp = (unsigned long long)holdingRegisters[1326];
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1327 : </strong></td><td>";
-   tmp = (unsigned long long)holdingRegisters[1327];
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1328 : </strong></td><td>";
-   tmp = (unsigned long long)holdingRegisters[1328];
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1329-1332 : </strong></td><td>";
-   tmp=0;
-  for (size_t i = 0; i < 4; ++i) {
-      tmp |= ((unsigned long long)holdingRegisters[1332-i] << (i * 16));
-  }
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1333-1336 : </strong></td><td>";
-   tmp=0;
-  for (size_t i = 0; i < 4; ++i) {
-      tmp |= ((unsigned long long)holdingRegisters[1336-i] << (i * 16));
-  }
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1337-1340 : </strong></td><td>";
-   tmp=0;
-  for (size_t i = 0; i < 4; ++i) {
-      tmp |= ((unsigned long long)holdingRegisters[1340-i] << (i * 16));
-  }
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1341-1344 : </strong></td><td>";
-   tmp=0;
-  for (size_t i = 0; i < 4; ++i) {
-      tmp |= ((unsigned long long)holdingRegisters[1344-i] << (i * 16));
-  }
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1345-1348 : </strong></td><td>";
-  tmp=0;
-  for (size_t i = 0; i < 4; ++i) {
-      tmp |= ((unsigned long long)holdingRegisters[1348-i] << (i * 16));
-  }
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1353-1356 : </strong></td><td>";
-  tmp=0;
-  for (size_t i = 0; i < 4; ++i) {
-      tmp |= ((unsigned long long)holdingRegisters[1356-i] << (i * 16));
-  }
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1357-1360 : </strong></td><td>";
-  tmp=0;
-  for (size_t i = 0; i < 4; ++i) {
-      tmp |= ((unsigned long long)holdingRegisters[1360-i] << (i * 16));
-  }
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1361-1364 : </strong></td><td>";
-  tmp=0;
-  for (size_t i = 0; i < 4; ++i) {
-      tmp |= ((unsigned long long)holdingRegisters[1364-i] << (i * 16));
-  }
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1365-1368 : </strong></td><td>";
-  tmp=0;
-  for (size_t i = 0; i < 4; ++i) {
-      tmp |= ((unsigned long long)holdingRegisters[1368-i] << (i * 16));
-  }
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1369-1372 : </strong></td><td>";
-  tmp=0;
-  for (size_t i = 0; i < 4; ++i) {
-      tmp |= ((unsigned long long)holdingRegisters[1372-i] << (i * 16));
-  }
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1400-1403 : </strong></td><td>";
-  tmp=0;
-  for (size_t i = 0; i < 4; ++i) {
-      tmp |= ((unsigned long long)holdingRegisters[1403-i] << (i * 16));
-  }
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1404-1407 : </strong></td><td>";
-  tmp=0;
-  for (size_t i = 0; i < 4; ++i) {
-      tmp |= ((unsigned long long)holdingRegisters[1407-i] << (i * 16));
-  }
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1408-1411 : </strong></td><td>";
-  tmp=0;
-  for (size_t i = 0; i < 4; ++i) {
-      tmp |= ((unsigned long long)holdingRegisters[1411-i] << (i * 16));
-  }
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1412-1415 : </strong></td><td>";
-  tmp=0;
-  for (size_t i = 0; i < 4; ++i) {
-      tmp |= ((unsigned long long)holdingRegisters[1415-i] << (i * 16));
-  }
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1416-1419 : </strong></td><td>";
-  tmp=0;
-  for (size_t i = 0; i < 4; ++i) {
-      tmp |= ((unsigned long long)holdingRegisters[1419-i] << (i * 16));
-  }
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1500-1503 : </strong></td><td>";
-  tmp=0;
-  for (size_t i = 0; i < 4; ++i) {
-      tmp |= ((unsigned long long)holdingRegisters[1503-i] << (i * 16));
-  }
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1504-1507 : </strong></td><td>";
-  tmp=0;
-  for (size_t i = 0; i < 4; ++i) {
-      tmp |= ((unsigned long long)holdingRegisters[1507-i] << (i * 16));
-  }
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1600 : </strong></td><td>";
-   tmp = (unsigned long long)holdingRegisters[1600];
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1601 : </strong></td><td>";
-   tmp = (unsigned long long)holdingRegisters[1601];
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1602 : </strong></td><td>";
-   tmp = (unsigned long long)holdingRegisters[1602];
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1603 : </strong></td><td>";
-   tmp = (unsigned long long)holdingRegisters[1603];
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1604 : </strong></td><td>";
-   tmp = (unsigned long long)holdingRegisters[1604];
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1605 : </strong></td><td>";
-   tmp = (unsigned long long)holdingRegisters[1605];
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1606 : </strong></td><td>";
-   tmp = (unsigned long long)holdingRegisters[1606];
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>1700 : </strong></td><td>";
-   tmp = (unsigned long long)holdingRegisters[1700];
-  mapping+=String(tmp);
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>3000-3099 : </strong></td><td>";
-  tmp=0;
-  for (size_t i = 0; i < 50; ++i) {
-      mapping+=String(static_cast<char>(holdingRegisters[3000+i]));
-  }
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>4000-4099 : </strong></td><td>";
-  tmp=0;
-  for (size_t i = 0; i < 50; ++i) {
-      mapping+=String(static_cast<char>(holdingRegisters[4000+i]));
-  }
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>5000-5099 : </strong></td><td>";
-  tmp=0;
-  for (size_t i = 0; i < 50; ++i) {
-      mapping+=String(static_cast<char>(holdingRegisters[5000+i]));
-  }
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>6000-6099 : </strong></td><td>";
-  tmp=0;
-  for (size_t i = 0; i < 50; ++i) {
-      mapping+=String(static_cast<char>(holdingRegisters[6000+i]));
-  }
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>6100-6199 : </strong></td><td>";
-  tmp=0;
-  for (size_t i = 0; i < 50; ++i) {
-      mapping+=String(static_cast<char>(holdingRegisters[6100+i]));
-  }
-  mapping +="</td></tr>";
-  mapping +="<tr><td><Strong>7000-7099 : </strong></td><td>";
-  tmp=0;
-  for (size_t i = 0; i < 50; ++i) {
-      mapping+=String(static_cast<char>(holdingRegisters[7000+i]));
-  }
-  mapping +="</td></tr>";
-  mapping +="</table>";
+  rowU64("300-303 :", 303);
+  rowStr("2000-2099 :", 2000, 50);
+  rowStr("2100-2199 :", 2100, 50);
+  rowStr("2200-2299 :", 2200, 50);
+  rowStr("2300-2399 :", 2300, 50);
+  rowU64("1000-1003 :", 1003);
+  rowU64("1004-1007 :", 1007);
+  rowU64("1008-1011 :", 1011);
+  rowU64("1012-1015 :", 1015);
+  rowU64("1016-1019 :", 1019);
+  rowU64("1020-1023 :", 1023);
+  rowU64("1024-1027 :", 1027);
+  rowU64("1028-1031 :", 1031);
+  rowU64("1032-1035 :", 1035);
+  rowU64("1036-1039 :", 1039);
+  rowU64("1040-1043 :", 1043);
+  rowU64("1100-1103 :", 1103);
+  rowU64("1104-1107 :", 1107);
+  rowU64("1108-1111 :", 1111);
+  rowU64("1112-1115 :", 1115);
+  rowU64("1200-1203 :", 1203);
+  rowU64("1300-1303 :", 1303);
+  rowU64("1304-1307 :", 1307);
+  rowU64("1308-1311 :", 1311);
+  rowU64("1312-1315 :", 1315);
+  rowU16("1320 :", 1320);
+  rowU16("1321 :", 1321);
+  rowU16("1322 :", 1322);
+  rowU16("1323 :", 1323);
+  rowU16("1324 :", 1324);
+  rowU16("1325 :", 1325);
+  rowU16("1398 :", 1398);
+  rowU16("1399 :", 1399);
+  rowU16("1326 :", 1326);
+  rowU16("1327 :", 1327);
+  rowU16("1328 :", 1328);
+  rowU64("1329-1332 :", 1332);
+  rowU64("1333-1336 :", 1336);
+  rowU64("1337-1340 :", 1340);
+  rowU64("1341-1344 :", 1344);
+  rowU64("1345-1348 :", 1348);
+  rowU64("1353-1356 :", 1356);
+  rowU64("1357-1360 :", 1360);
+  rowU64("1361-1364 :", 1364);
+  rowU64("1365-1368 :", 1368);
+  rowU64("1369-1372 :", 1372);
+  rowU64("1400-1403 :", 1403);
+  rowU64("1404-1407 :", 1407);
+  rowU64("1408-1411 :", 1411);
+  rowU64("1412-1415 :", 1415);
+  rowU64("1416-1419 :", 1419);
+  rowU64("1500-1503 :", 1503);
+  rowU64("1504-1507 :", 1507);
+  rowU16("1600 :", 1600);
+  rowU16("1601 :", 1601);
+  rowU16("1602 :", 1602);
+  rowU16("1603 :", 1603);
+  rowU16("1604 :", 1604);
+  rowU16("1605 :", 1605);
+  rowU16("1606 :", 1606);
+  rowU16("1700 :", 1700);
+  rowStr("3000-3099 :", 3000, 50);
+  rowStr("4000-4099 :", 4000, 50);
+  rowStr("5000-5099 :", 5000, 50);
+  rowStr("6000-6099 :", 6000, 50);
+  rowStr("6100-6199 :", 6100, 50);
+  rowStr("7000-7099 :", 7000, 50);
 
-  result.replace("{{mapping_modbus}}", mapping);
-
-  request->send(200, "text/html", result);
+  response->print(F("</table></div></div></div>"));
+  response->print(FPSTR(HTTP_FOOTER));
+  response->print(F("</html>"));
+  request->send(response);
 }
 
 void handleConfigGeneral(AsyncWebServerRequest *request)
