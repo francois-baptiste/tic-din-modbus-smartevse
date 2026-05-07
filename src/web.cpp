@@ -427,6 +427,40 @@ void handleStatusNetwork(AsyncWebServerRequest *request)
   long long tmp;
   mapping +="<table>";
   mapping +="<tr><td><strong>Registry</strong></td><td><strong>Value</strong></td></tr>";
+  mapping +="<tr><td colspan='2'><strong>&mdash; SmartEVSE Custom Meter (regs 0-31) &mdash;</strong></td></tr>";
+  { int32_t v=(int32_t)(((uint32_t)holdingRegisters[0]<<16)|holdingRegisters[1]);
+    mapping +="<tr><td><Strong>0-1 IRMS1 (mA) : </Strong></td><td>"; mapping+=String(v); mapping+="</td></tr>"; }
+  { int32_t v=(int32_t)(((uint32_t)holdingRegisters[2]<<16)|holdingRegisters[3]);
+    mapping +="<tr><td><Strong>2-3 IRMS2 (mA) : </Strong></td><td>"; mapping+=String(v); mapping+="</td></tr>"; }
+  { int32_t v=(int32_t)(((uint32_t)holdingRegisters[4]<<16)|holdingRegisters[5]);
+    mapping +="<tr><td><Strong>4-5 IRMS3 (mA) : </Strong></td><td>"; mapping+=String(v); mapping+="</td></tr>"; }
+  { int32_t v=(int32_t)(((uint32_t)holdingRegisters[6]<<16)|holdingRegisters[7]);
+    mapping +="<tr><td><Strong>6-7 URMS1 (V\xc3\x97""10) : </Strong></td><td>"; mapping+=String(v); mapping+="</td></tr>"; }
+  { int32_t v=(int32_t)(((uint32_t)holdingRegisters[8]<<16)|holdingRegisters[9]);
+    mapping +="<tr><td><Strong>8-9 URMS2 (V\xc3\x97""10) : </Strong></td><td>"; mapping+=String(v); mapping+="</td></tr>"; }
+  { int32_t v=(int32_t)(((uint32_t)holdingRegisters[10]<<16)|holdingRegisters[11]);
+    mapping +="<tr><td><Strong>10-11 URMS3 (V\xc3\x97""10) : </Strong></td><td>"; mapping+=String(v); mapping+="</td></tr>"; }
+  { int32_t v=(int32_t)(((uint32_t)holdingRegisters[12]<<16)|holdingRegisters[13]);
+    mapping +="<tr><td><Strong>12-13 PAPP (VA) : </Strong></td><td>"; mapping+=String(v); mapping+="</td></tr>"; }
+  { int32_t v=(int32_t)(((uint32_t)holdingRegisters[14]<<16)|holdingRegisters[15]);
+    mapping +="<tr><td><Strong>14-15 PAPP1 (VA) : </Strong></td><td>"; mapping+=String(v); mapping+="</td></tr>"; }
+  { int32_t v=(int32_t)(((uint32_t)holdingRegisters[16]<<16)|holdingRegisters[17]);
+    mapping +="<tr><td><Strong>16-17 PAPP2 (VA) : </Strong></td><td>"; mapping+=String(v); mapping+="</td></tr>"; }
+  { int32_t v=(int32_t)(((uint32_t)holdingRegisters[18]<<16)|holdingRegisters[19]);
+    mapping +="<tr><td><Strong>18-19 PAPP3 (VA) : </Strong></td><td>"; mapping+=String(v); mapping+="</td></tr>"; }
+  { uint32_t b=((uint32_t)holdingRegisters[20]<<16)|holdingRegisters[21]; float f; memcpy(&f,&b,4);
+    mapping +="<tr><td><Strong>20-21 I total (A, FLOAT32) : </Strong></td><td>"; mapping+=String(f,2); mapping+=" A</td></tr>"; }
+  { mapping +="<tr><td><Strong>22 I total (A\xc3\x97""100) : </Strong></td><td>"; mapping+=String(holdingRegisters[22]); mapping+="</td></tr>"; }
+  { uint32_t b=((uint32_t)holdingRegisters[23]<<16)|holdingRegisters[24]; float f; memcpy(&f,&b,4);
+    mapping +="<tr><td><Strong>23-24 I L1 (A, FLOAT32) : </Strong></td><td>"; mapping+=String(f,2); mapping+=" A</td></tr>"; }
+  { mapping +="<tr><td><Strong>25 I L1 (A\xc3\x97""100) : </Strong></td><td>"; mapping+=String(holdingRegisters[25]); mapping+="</td></tr>"; }
+  { uint32_t b=((uint32_t)holdingRegisters[26]<<16)|holdingRegisters[27]; float f; memcpy(&f,&b,4);
+    mapping +="<tr><td><Strong>26-27 I L2 (A, FLOAT32) : </Strong></td><td>"; mapping+=String(f,2); mapping+=" A</td></tr>"; }
+  { mapping +="<tr><td><Strong>28 I L2 (A\xc3\x97""100) : </Strong></td><td>"; mapping+=String(holdingRegisters[28]); mapping+="</td></tr>"; }
+  { uint32_t b=((uint32_t)holdingRegisters[29]<<16)|holdingRegisters[30]; float f; memcpy(&f,&b,4);
+    mapping +="<tr><td><Strong>29-30 I L3 (A, FLOAT32) : </Strong></td><td>"; mapping+=String(f,2); mapping+=" A</td></tr>"; }
+  { mapping +="<tr><td><Strong>31 I L3 (A\xc3\x97""100) : </Strong></td><td>"; mapping+=String(holdingRegisters[31]); mapping+="</td></tr>"; }
+  mapping +="<tr><td colspan='2'><strong>&mdash; TIC Modbus Mapping &mdash;</strong></td></tr>";
   mapping +="<tr><td><Strong>300-303 : </Strong></td><td>";
   for (size_t i = 0; i < 4; ++i) {
       tmp |= ((unsigned long long)holdingRegisters[303-i] << (i * 16));
@@ -623,6 +657,13 @@ void handleStatusNetwork(AsyncWebServerRequest *request)
    tmp=0;
   for (size_t i = 0; i < 4; ++i) {
       tmp |= ((unsigned long long)holdingRegisters[1340-i] << (i * 16));
+  }
+  mapping+=String(tmp);
+  mapping +="</td></tr>";
+  mapping +="<tr><td><Strong>1341-1344 : </strong></td><td>";
+   tmp=0;
+  for (size_t i = 0; i < 4; ++i) {
+      tmp |= ((unsigned long long)holdingRegisters[1344-i] << (i * 16));
   }
   mapping+=String(tmp);
   mapping +="</td></tr>";
