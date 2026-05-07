@@ -226,24 +226,56 @@ Click to **"save"** to validate
 
 This fork adds native compatibility with [SmartEVSE v3.1](https://github.com/SmartEVSE/SmartEVSE-3) dynamic load balancing. The device exposes a **SmartEVSE mirror register block** at addresses **0–19** that SmartEVSE can read directly as a Custom meter.
 
-### Mirror register block (registers 0–19)
+### Mirror register block (registers 0–22)
 
-All values are **signed INT32, big-endian (high word first)**, FC=3 (holding registers).
+Registers 0–19 are **signed INT32, big-endian (high word first)**, FC=3 (holding registers).  
+Registers 20–22 add a **high-precision current** derived from `SINSTS ÷ URMS1` (see below).
 
-| Registers | Content | Unit | Source TIC field |
-|-----------|---------|------|-----------------|
-| 0–1 | Current L1 | mA | IRMS1 / IINST1 |
-| 2–3 | Current L2 | mA | IRMS2 / IINST2 |
-| 4–5 | Current L3 | mA | IRMS3 / IINST3 |
-| 6–7 | Voltage L1 | V×10 | URMS1 |
-| 8–9 | Voltage L2 | V×10 | URMS2 |
-| 10–11 | Voltage L3 | V×10 | URMS3 |
-| 12–13 | Total apparent power | VA | SINSTS / PAPP |
-| 14–15 | Apparent power L1 | VA | SINSTS1 / PAPP |
-| 16–17 | Apparent power L2 | VA | SINSTS2 |
-| 18–19 | Apparent power L3 | VA | SINSTS3 |
+| Registers | Content | Format | Unit | Source TIC field |
+|-----------|---------|--------|------|-----------------|
+| 0–1 | Current L1 | INT32 | mA | IRMS1 / IINST1 |
+| 2–3 | Current L2 | INT32 | mA | IRMS2 / IINST2 |
+| 4–5 | Current L3 | INT32 | mA | IRMS3 / IINST3 |
+| 6–7 | Voltage L1 | INT32 | V×10 | URMS1 |
+| 8–9 | Voltage L2 | INT32 | V×10 | URMS2 |
+| 10–11 | Voltage L3 | INT32 | V×10 | URMS3 |
+| 12–13 | Total apparent power | INT32 | VA | SINSTS / PAPP |
+| 14–15 | Apparent power L1 | INT32 | VA | SINSTS1 / PAPP |
+| 16–17 | Apparent power L2 | INT32 | VA | SINSTS2 |
+| 18–19 | Apparent power L3 | INT32 | VA | SINSTS3 |
+| 20–21 | Total precise current *(Option A)* | FLOAT32 | A | SINSTS ÷ URMS1 |
+| 22 | Total precise current *(Option B)* | UINT16 | cA (×100) | SINSTS ÷ URMS1 |
+| 23–24 | L1 precise current *(Option A)* | FLOAT32 | A | SINSTS1 ÷ URMS1 |
+| 25 | L1 precise current *(Option B)* | UINT16 | cA (×100) | SINSTS1 ÷ URMS1 |
+| 26–27 | L2 precise current *(Option A)* | FLOAT32 | A | SINSTS2 ÷ URMS2 |
+| 28 | L2 precise current *(Option B)* | UINT16 | cA (×100) | SINSTS2 ÷ URMS2 |
+| 29–30 | L3 precise current *(Option A)* | FLOAT32 | A | SINSTS3 ÷ URMS3 |
+| 31 | L3 precise current *(Option B)* | UINT16 | cA (×100) | SINSTS3 ÷ URMS3 |
 
-> **Historic single-phase meters**: L1 carries IINST and PAPP; L2/L3 are set to 0.
+> **Historic single-phase meters**: L1 carries IINST and PAPP; L2/L3 are set to 0. URMS1/2/3 default to 230 V since historic frames do not transmit voltage.
+
+### High-precision current (registers 20–31)
+
+IRMS1/IINST carry only whole-ampere values (1 A resolution). This register block provides a sub-ampere current estimate derived from apparent power and voltage, updated at every SINSTS or URMS frame:
+
+```
+Total current = SINSTS  (VA) / URMS1 (V)    fallback denominator: 230 V if URMS = 0
+L1 current    = SINSTS1 (VA) / URMS1 (V)
+L2 current    = SINSTS2 (VA) / URMS2 (V)
+L3 current    = SINSTS3 (VA) / URMS3 (V)
+```
+
+**Option A — Float32 (2 registers each)**  
+IEEE 754 single-precision float, big-endian (high word first). SmartEVSE config:
+- Data type: `FLOAT32`, Endianness: `HBF & HWF` (3), divisor: `0`
+- Use register `20` for total, `23` for L1, `26` for L2, `29` for L3
+
+**Option B — Scaled UInt16 (1 register each)**  
+Value = `round(current × 100)`, e.g. 15.42 A → 1542. SmartEVSE config:
+- Data type: `INT16`, divisor: `2` (÷ 100 → A)
+- Use register `22` for total, `25` for L1, `28` for L2, `31` for L3
+
+> Precision is bounded by the Linky's 1 VA / 1 V resolution (~0.4% at 230 V, 10 A) — significantly finer than the 1 A step of IRMS1/IINST.
 
 ### Wiring
 
@@ -273,10 +305,10 @@ In the SmartEVSE menu (`CONFIG → Meter → Mains`), select **Custom** and appl
 Use a Modbus RTU master tool (e.g. `modpoll`, Modbus Poll app) to confirm the TIC-DIN-MODBUS answers on address 11 before configuring SmartEVSE:
 
 ```
-modpoll -m rtu -a 11 -r 1 -c 20 -t 4 /dev/ttyUSB0
+modpoll -m rtu -a 11 -r 1 -c 32 -t 4 /dev/ttyUSB0
 ```
 
-Registers 0–19 should show non-zero values once the Linky meter is transmitting.
+Registers 0–19 should show non-zero values once the Linky meter is transmitting. Registers 20–31 (precise current, total and per-phase) update whenever SINSTS or URMS frames are received.
 
 ---
 
