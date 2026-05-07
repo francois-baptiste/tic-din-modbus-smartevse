@@ -106,6 +106,10 @@ bool bDataProcessingHisto(char *au8Command,char *au8Value, uint8_t au8Pos)
   {
     Serial.print("HHPHC : ");
     Serial.println(au8Value);
+    for (size_t i = 0; i < strlen(au8Value); ++i)
+    {
+      holdingRegisters[5000+i] = static_cast<uint16_t>(au8Value[i]);
+    }
   }else if (memcmp(au8Command,"OPTARIF",7)==0)
   {
     Serial.print("OPTARIF : ");
@@ -375,14 +379,6 @@ bool bDataProcessingHisto(char *au8Command,char *au8Value, uint8_t au8Pos)
     holdingRegisters[1606] = (uint16_t)tmp & 0xFFFF;
     Serial.print("PEJP : ");
     Serial.println(tmp);
-  }else if (memcmp(au8Command,"HHPHC",4)==0)
-  {
-    Serial.print("HHPHC : ");
-    Serial.println(au8Value);
-    for (size_t i = 0; i < strlen(au8Value); ++i) 
-    {
-      holdingRegisters[5000+i] = static_cast<uint16_t>(au8Value[i]);
-    }
   }else{
      //vérifier fichier spécifique
     const char* path ="/modbus/registre_spec.json";
@@ -504,7 +500,7 @@ bool bDataProcessingStandard(char *au8Command,char *au8Value, uint8_t au8Pos)
     Serial.print("EAST : ");
     Serial.println(tmp);
 
-  }else if (memcmp(au8Command,"EASF01",7)==0)
+  }else if (memcmp(au8Command,"EASF01",6)==0)
   {
     long long tmp = strtoull(au8Value,NULL,10);  
 
@@ -516,7 +512,7 @@ bool bDataProcessingStandard(char *au8Command,char *au8Value, uint8_t au8Pos)
     Serial.print("EASF01 : ");
     Serial.println(tmp);
 
-  }else if (memcmp(au8Command,"EASF02",7)==0)
+  }else if (memcmp(au8Command,"EASF02",6)==0)
   {
     long long tmp = strtoull(au8Value,NULL,10);  
 
@@ -528,7 +524,7 @@ bool bDataProcessingStandard(char *au8Command,char *au8Value, uint8_t au8Pos)
     Serial.print("EASF02 : ");
     Serial.println(tmp);
 
-  }else if (memcmp(au8Command,"EASF03",7)==0)
+  }else if (memcmp(au8Command,"EASF03",6)==0)
   {
     long long tmp = strtoull(au8Value,NULL,10);  
 
@@ -540,7 +536,7 @@ bool bDataProcessingStandard(char *au8Command,char *au8Value, uint8_t au8Pos)
     Serial.print("EASF03 : ");
     Serial.println(tmp);
 
-  }else if (memcmp(au8Command,"EASF04",7)==0)
+  }else if (memcmp(au8Command,"EASF04",6)==0)
   {
     long long tmp = strtoull(au8Value,NULL,10);  
 
@@ -552,7 +548,7 @@ bool bDataProcessingStandard(char *au8Command,char *au8Value, uint8_t au8Pos)
     Serial.print("EASF04 : ");
     Serial.println(tmp);
 
-  }else if (memcmp(au8Command,"EASF05",7)==0)
+  }else if (memcmp(au8Command,"EASF05",6)==0)
   {
     long long tmp = strtoull(au8Value,NULL,10);  
 
@@ -564,7 +560,7 @@ bool bDataProcessingStandard(char *au8Command,char *au8Value, uint8_t au8Pos)
     Serial.print("EASF05 : ");
     Serial.println(tmp);
 
-  }else if (memcmp(au8Command,"EASF06",7)==0)
+  }else if (memcmp(au8Command,"EASF06",6)==0)
   {
     long long tmp = strtoull(au8Value,NULL,10);  
 
@@ -576,7 +572,7 @@ bool bDataProcessingStandard(char *au8Command,char *au8Value, uint8_t au8Pos)
     Serial.print("EASF06 : ");
     Serial.println(tmp);
 
-  }else if (memcmp(au8Command,"EASF07",7)==0)
+  }else if (memcmp(au8Command,"EASF07",6)==0)
   {
     long long tmp = strtoull(au8Value,NULL,10);  
 
@@ -588,7 +584,7 @@ bool bDataProcessingStandard(char *au8Command,char *au8Value, uint8_t au8Pos)
     Serial.print("EASF07 : ");
     Serial.println(tmp);
 
-  }else if (memcmp(au8Command,"EASF08",7)==0)
+  }else if (memcmp(au8Command,"EASF08",6)==0)
   {
     long long tmp = strtoull(au8Value,NULL,10);  
 
@@ -600,7 +596,7 @@ bool bDataProcessingStandard(char *au8Command,char *au8Value, uint8_t au8Pos)
     Serial.print("EASF08 : ");
     Serial.println(tmp);
 
-  }else if (memcmp(au8Command,"EASF09",7)==0)
+  }else if (memcmp(au8Command,"EASF09",6)==0)
   {
     long long tmp = strtoull(au8Value,NULL,10);  
 
@@ -612,7 +608,7 @@ bool bDataProcessingStandard(char *au8Command,char *au8Value, uint8_t au8Pos)
     Serial.print("EASF09 : ");
     Serial.println(tmp);
 
-  }else if (memcmp(au8Command,"EASF10",7)==0)
+  }else if (memcmp(au8Command,"EASF10",6)==0)
   {
     long long tmp = strtoull(au8Value,NULL,10);  
 
@@ -624,7 +620,7 @@ bool bDataProcessingStandard(char *au8Command,char *au8Value, uint8_t au8Pos)
     Serial.print("EASF10 : ");
     Serial.println(tmp);
 
-  }else if (memcmp(au8Command,"EASD01",7)==0)
+  }else if (memcmp(au8Command,"EASD01",6)==0)
   {
     long long tmp = strtoull(au8Value,NULL,10);  
 
@@ -636,7 +632,7 @@ bool bDataProcessingStandard(char *au8Command,char *au8Value, uint8_t au8Pos)
     Serial.print("EASD01 : ");
     Serial.println(tmp);
 
-  }else if (memcmp(au8Command,"EASD02",7)==0)
+  }else if (memcmp(au8Command,"EASD02",6)==0)
   {
     long long tmp = strtoull(au8Value,NULL,10);  
 
@@ -648,7 +644,7 @@ bool bDataProcessingStandard(char *au8Command,char *au8Value, uint8_t au8Pos)
     Serial.print("EASD02 : ");
     Serial.println(tmp);
 
-  }else if (memcmp(au8Command,"EASD03",7)==0)
+  }else if (memcmp(au8Command,"EASD03",6)==0)
   {
     long long tmp = strtoull(au8Value,NULL,10);  
 
@@ -660,7 +656,7 @@ bool bDataProcessingStandard(char *au8Command,char *au8Value, uint8_t au8Pos)
     Serial.print("EASD03 : ");
     Serial.println(tmp);
 
-  }else if (memcmp(au8Command,"EASD04",7)==0)
+  }else if (memcmp(au8Command,"EASD04",6)==0)
   {
     long long tmp = strtoull(au8Value,NULL,10);  
 
@@ -1210,10 +1206,10 @@ bool bDataProcessingStandard(char *au8Command,char *au8Value, uint8_t au8Pos)
       return false;
     }
 
-  }else if (memcmp(au8Command,"DPM2",4)==0)
+  }else if (memcmp(au8Command,"DPM3",4)==0)
   {
     uint16_t tmp = atoi(au8Value);
-    Serial.print("DPM2 : ");
+    Serial.print("DPM3 : ");
     Serial.println(tmp);
     if (au8Pos != 3)
     {
@@ -1247,9 +1243,9 @@ bool bDataProcessingStandard(char *au8Command,char *au8Value, uint8_t au8Pos)
     uint16_t tmp = atoi(au8Value);
     Serial.print("NJOURF : ");
     Serial.println(tmp);
-  }else if (memcmp(au8Command,"nPJOURF+1",8)==0)
+  }else if (memcmp(au8Command,"PJOURF+1",8)==0)
   {
-    Serial.print("NJOURF+1 : ");
+    Serial.print("PJOURF+1 : ");
     Serial.println(au8Value);
   }else if (memcmp(au8Command,"PPOINTE",7)==0)
   {
