@@ -1,3 +1,31 @@
+# TIC-DIN-MODBUS — SmartEVSE fork
+
+> **This is a custom fork** of [fairecasoimeme/TIC-DIN-MODBUS](https://github.com/fairecasoimeme/TIC-DIN-MODBUS), adding native support for **SmartEVSE v3.1 dynamic load balancing** using the Linky meter as the mains meter.
+>
+> The fork source and releases are at: **https://github.com/francois-baptiste/tic-din-modbus-smartevse**
+
+## Purpose of this fork
+
+The original TIC-DIN-MODBUS firmware exposes Linky TIC data over Modbus RTU, but its register layout does not match the format expected by SmartEVSE v3.1's "Custom" mains meter input.
+
+This fork adds a **SmartEVSE mirror register block** at addresses **0–34** that SmartEVSE can read directly without any scaling configuration beyond standard INT32/FLOAT32 types:
+
+| Feature | Registers | Detail |
+|---------|-----------|--------|
+| Current L1/L2/L3 | 0–5 | INT32, mA |
+| Voltage L1/L2/L3 | 6–11 | INT32, V×10 |
+| Apparent power total + per phase | 12–19 | INT32, VA |
+| High-precision current total + per phase | 20–31 | FLOAT32 + UINT16×100 |
+| Power factor cos φ (total) | 32–34 | FLOAT32 + UINT16×1000 |
+
+**Precision current** (registers 20–31): derived from `SINSTS ÷ URMS`, giving sub-ampere resolution vs. the 1 A step of raw IRMS.
+
+**Power factor / cos φ** (registers 32–34): derived from the rate of change of the active energy index (EAST / BASE / HC+HP) divided by the instantaneous apparent power (SINSTS / PAPP). Only the Wh ticks that actually increment are used, eliminating frame-rate noise. An EMA (α = 0.25) smooths the result. Falls back to CCASN when no energy increment has arrived in > 60 s. Per-phase cos φ is not available because TIC does not provide per-phase active power.
+
+See the [SmartEVSE v3.1 section](#smartevse-v31--dynamic-load-balancing-linky-as-mains-meter) below for wiring and configuration details.
+
+---
+
 # TIC-DIN-MODBUS
 
 **TIC-DIN-MODBUS** is a device which can demodulate Linky informations TIC (or old french counter meter). It provides informations with RS845 Modbus RTU interface.
@@ -226,13 +254,14 @@ Click to **"save"** to validate
 
 This fork adds native compatibility with [SmartEVSE v3.1](https://github.com/SmartEVSE/SmartEVSE-3) dynamic load balancing. The device exposes a **SmartEVSE mirror register block** at addresses **0–19** that SmartEVSE can read directly as a Custom meter.
 
-### Mirror register block (registers 0–22)
+### Mirror register block (registers 0–34)
 
 Registers 0–19 are **signed INT32, big-endian (high word first)**, FC=3 (holding registers).  
-Registers 20–22 add a **high-precision current** derived from `SINSTS ÷ URMS1` (see below).
+Registers 20–31 add **high-precision current** (FLOAT32 + UINT16×100).  
+Registers 32–34 add **power factor / cos φ** (FLOAT32 + UINT16×1000).
 
-| Registers | Content | Format | Unit | Source TIC field |
-|-----------|---------|--------|------|-----------------|
+| Registers | Content | Format | Unit | Source |
+|-----------|---------|--------|------|--------|
 | 0–1 | Current L1 | INT32 | mA | IRMS1 / IINST1 |
 | 2–3 | Current L2 | INT32 | mA | IRMS2 / IINST2 |
 | 4–5 | Current L3 | INT32 | mA | IRMS3 / IINST3 |
@@ -251,6 +280,8 @@ Registers 20–22 add a **high-precision current** derived from `SINSTS ÷ URMS1
 | 28 | L2 precise current *(Option B)* | UINT16 | cA (×100) | SINSTS2 ÷ URMS2 |
 | 29–30 | L3 precise current *(Option A)* | FLOAT32 | A | SINSTS3 ÷ URMS3 |
 | 31 | L3 precise current *(Option B)* | UINT16 | cA (×100) | SINSTS3 ÷ URMS3 |
+| 32–33 | Power factor cos φ *(Option A)* | FLOAT32 | 0.0–1.0 | ΔWh ÷ Δt ÷ SINSTS |
+| 34 | Power factor cos φ *(Option B)* | UINT16 | ×1000 (e.g. 956 = 0.956) | ΔWh ÷ Δt ÷ SINSTS |
 
 > **Historic single-phase meters**: L1 carries IINST and PAPP; L2/L3 are set to 0. URMS1/2/3 default to 230 V since historic frames do not transmit voltage.
 
@@ -276,6 +307,26 @@ Value = `round(current × 100)`, e.g. 15.42 A → 1542. SmartEVSE config:
 - Use register `22` for total, `25` for L1, `28` for L2, `31` for L3
 
 > Precision is bounded by the Linky's 1 VA / 1 V resolution (~0.4% at 230 V, 10 A) — significantly finer than the 1 A step of IRMS1/IINST.
+
+### Power factor / cos φ (registers 32–34)
+
+The power factor is estimated from the rate of change of the **active energy index** (EAST in standard mode; BASE, HCHC+HCHP, or Tempo sub-indices in historic mode) divided by the instantaneous apparent power.
+
+```
+P_raw  = ΔWh × 3,600,000 / Δt_ms        (W, computed only when the Wh index increments)
+P_ema  = 0.25 × P_raw + 0.75 × P_ema    (exponential moving average, α = 0.25)
+cos φ  = P_ema / SINSTS (or PAPP)        (clamped to [0, 1])
+```
+
+Key properties:
+- **Only Wh ticks are used** — frames where the energy index does not change do not move `Δt`, so no quantisation noise accumulates during constant-power periods.
+- **EMA seeded directly** on the first sample to avoid a slow ramp-up from zero.
+- **Timeout fallback** — if no energy increment has arrived in > 60 s (load < ~60 W), the register falls back to CCASN (if available in standard mode) or 0, rather than becoming stale.
+- **Per-phase cos φ is not available** — the Linky does not provide per-phase active power.
+
+**Reading with SmartEVSE or a Modbus master:**
+- Register 32–33: `FLOAT32`, big-endian (HBF & HWF), value range 0.0–1.0
+- Register 34: `UINT16`, value = `round(cos φ × 1000)` — e.g. 956 → cos φ = 0.956
 
 ### Wiring
 
@@ -305,14 +356,39 @@ In the SmartEVSE menu (`CONFIG → Meter → Mains`), select **Custom** and appl
 Use a Modbus RTU master tool (e.g. `modpoll`, Modbus Poll app) to confirm the TIC-DIN-MODBUS answers on address 11 before configuring SmartEVSE:
 
 ```
-modpoll -m rtu -a 11 -r 1 -c 32 -t 4 /dev/ttyUSB0
+modpoll -m rtu -a 11 -r 1 -c 35 -t 4 /dev/ttyUSB0
 ```
 
-Registers 0–19 should show non-zero values once the Linky meter is transmitting. Registers 20–31 (precise current, total and per-phase) update whenever SINSTS or URMS frames are received.
+Registers 0–19 should show non-zero values once the Linky meter is transmitting. Registers 20–31 (precise current) update on every SINSTS or URMS frame. Registers 32–34 (cos φ) update whenever the active energy index increments (every few seconds at typical residential loads).
 
 ---
 
 ## Changelog
+
+### Version v1.10-smartevse
+* Refactor cos φ computation to energy-delta method (replaces CCASN÷SINSTS)
+  * Tracks EAST (standard) or BASE/HCHC+HCHP/Tempo indices (historic) with `millis()` timestamps
+  * P computed only on actual Wh increments — eliminates quantisation noise between ticks
+  * EMA (α = 0.25) smooths instantaneous P; seeded directly on first sample
+  * Timeout fallback to CCASN after 60 s of no energy increment (very low load)
+  * Full historic mode support: BASE, HC/HP, EJP, and all 6 Tempo sub-indices
+
+### Version v1.9-smartevse
+* Add power factor (cos φ) register block (regs 32–34): FLOAT32 and UINT16×1000
+  * Initial implementation: CCASN (10-min avg active power) ÷ SINSTS — replaced in v1.10
+* Update Help page to describe fork features and link to forked repository
+
+### Version v1.8-smartevse
+* Fix web UI OOM crash: rewrite `handleStatusNetwork` with `AsyncResponseStream` to eliminate large heap allocations
+
+### Version v1.7-smartevse
+* Add all missing TIC registers to the status page (EAIT, ERQ1–4, SMAXSN, CCASN, CCAIN, SINSTS1/2/3, etc.)
+
+### Version v1.6-smartevse
+* Add SmartEVSE Custom Meter register block (regs 0–31): INT32 currents/voltages/powers + FLOAT32 precise current
+
+### Version v1.5-smartevse
+* Merge feature/precise-current-sinsts-urms into master
 
 ### Version 1.1
 * Fix Serial speed change between historic and standard mode

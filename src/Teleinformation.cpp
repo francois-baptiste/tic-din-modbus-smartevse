@@ -46,6 +46,11 @@ static void seWriteInt32(uint16_t reg, int32_t value) {
 #define SE_PRECISE_I3_FLOAT_REG  29  // L3:    regs 29-30
 #define SE_PRECISE_I3_U16_REG    31
 
+// Power factor (cos phi) registers — total only (per-phase active power not in TIC)
+// cos phi = CCASN (10-min avg active power, W) / SINSTS (instantaneous apparent power, VA)
+#define SE_COSPHI_FLOAT_REG      32  // Total cos phi FLOAT32, regs 32-33
+#define SE_COSPHI_U16_REG        34  // Total cos phi × 1000, UINT16, reg 34
+
 static uint32_t s_sinsts_va  = 0;    // total apparent power (SINSTS / PAPP)
 static uint32_t s_sinsts1_va = 0;    // L1 apparent power (SINSTS1)
 static uint32_t s_sinsts2_va = 0;    // L2 apparent power (SINSTS2)
@@ -53,6 +58,25 @@ static uint32_t s_sinsts3_va = 0;    // L3 apparent power (SINSTS3)
 static uint16_t s_urms1_v    = 230;  // L1 voltage in V (default 230 V)
 static uint16_t s_urms2_v    = 230;  // L2 voltage in V (default 230 V)
 static uint16_t s_urms3_v    = 230;  // L3 voltage in V (default 230 V)
+static uint32_t s_ccasn_w     = 0;    // CCASN 10-min avg active power (W) — fallback only
+
+// ── Energy-delta active power estimation (primary cos phi source) ─────────────
+// Records millis() only when the Wh index actually increments, eliminating
+// quantisation noise from frames where the counter hasn't changed.
+// EMA (alpha=0.25) smooths the instantaneous P_raw computed on each increment.
+// Falls back to CCASN when no increment has arrived in > 60 s (very low load).
+static uint64_t s_east_wh      = 0;   // last EAST (standard mode)
+static uint64_t s_hchc_wh      = 0;   // last BASE / HCHC / EJPHN / BBRHCJB
+static uint64_t s_hchp_wh      = 0;   // last HCHP / EJPHPM / BBRHPJB
+static uint64_t s_hchcjw_wh    = 0;   // last BBRHCJW (Tempo white-day HC)
+static uint64_t s_hchpjw_wh    = 0;   // last BBRHPJW (Tempo white-day HP)
+static uint64_t s_hchcjr_wh    = 0;   // last BBRHCJR (Tempo red-day HC)
+static uint64_t s_hchpjr_wh    = 0;   // last BBRHPJR (Tempo red-day HP)
+static uint64_t s_last_histo_wh = 0;  // historic total at last P computation
+static uint32_t s_energy_ms    = 0;   // millis() at last Wh increment
+static float    s_power_ema_w  = 0.0f; // EMA-smoothed active power (W)
+static bool     s_east_init    = false; // EAST baseline recorded
+static bool     s_histo_init   = false; // historic baseline recorded
 
 static void seWriteFloat32(uint16_t reg, float value) {
     uint32_t bits;
@@ -72,6 +96,63 @@ static void seUpdatePreciseCurrent()   { seWritePreciseCurrent(SE_PRECISE_I_FLOA
 static void seUpdatePreciseCurrentL1() { seWritePreciseCurrent(SE_PRECISE_I1_FLOAT_REG, SE_PRECISE_I1_U16_REG, s_sinsts1_va, s_urms1_v); }
 static void seUpdatePreciseCurrentL2() { seWritePreciseCurrent(SE_PRECISE_I2_FLOAT_REG, SE_PRECISE_I2_U16_REG, s_sinsts2_va, s_urms2_v); }
 static void seUpdatePreciseCurrentL3() { seWritePreciseCurrent(SE_PRECISE_I3_FLOAT_REG, SE_PRECISE_I3_U16_REG, s_sinsts3_va, s_urms3_v); }
+
+// seUpdateCosPhi: write cos phi registers from current EMA or CCASN fallback.
+// Called after every energy increment and on SINSTS/PAPP/CCASN frames.
+static void seUpdateCosPhi() {
+    if (s_sinsts_va == 0) return;
+    bool energy_seen = s_east_init || s_histo_init;
+    bool stale       = energy_seen && ((uint32_t)millis() - s_energy_ms) > 60000u;
+    float P = (!energy_seen || stale) ? (float)s_ccasn_w : s_power_ema_w;
+    float cos_phi = P / (float)s_sinsts_va;
+    if (cos_phi > 1.0f) cos_phi = 1.0f;
+    seWriteFloat32(SE_COSPHI_FLOAT_REG, cos_phi);
+    holdingRegisters[SE_COSPHI_U16_REG] = (uint16_t)(cos_phi * 1000.0f + 0.5f);
+}
+
+// applyEnergyDelta: compute P from a confirmed Wh increment and feed the EMA.
+// dt guard (500 ms) rejects anomalously fast back-to-back frames.
+static void applyEnergyDelta(uint64_t delta_wh, uint32_t now_ms) {
+    uint32_t dt = now_ms - s_energy_ms;
+    s_energy_ms = now_ms;
+    if (dt < 500 || delta_wh == 0) return;
+    float P_raw = (float)delta_wh * 3600000.0f / (float)dt;
+    const float alpha = 0.25f;
+    // Seed directly on first sample so the output is usable immediately.
+    s_power_ema_w = (s_power_ema_w > 0.0f)
+                    ? (alpha * P_raw + (1.0f - alpha) * s_power_ema_w)
+                    : P_raw;
+}
+
+// standardEnergyUpdate: called on every incoming EAST frame.
+static void standardEnergyUpdate(uint64_t wh) {
+    uint32_t now = (uint32_t)millis();
+    if (!s_east_init) {
+        s_east_wh = wh; s_energy_ms = now; s_east_init = true; return;
+    }
+    if (wh > s_east_wh) {
+        applyEnergyDelta(wh - s_east_wh, now);
+        s_east_wh = wh;
+        seUpdateCosPhi();
+    }
+}
+
+// histoEnergyUpdate: called after any historic tariff index changes.
+// Computes the total across all active sub-indices (BASE/HC/HP + Tempo groups).
+static void histoEnergyUpdate() {
+    uint64_t total = s_hchc_wh + s_hchp_wh
+                   + s_hchcjw_wh + s_hchpjw_wh
+                   + s_hchcjr_wh + s_hchpjr_wh;
+    uint32_t now = (uint32_t)millis();
+    if (!s_histo_init) {
+        s_last_histo_wh = total; s_energy_ms = now; s_histo_init = true; return;
+    }
+    if (total > s_last_histo_wh) {
+        applyEnergyDelta(total - s_last_histo_wh, now);
+        s_last_histo_wh = total;
+        seUpdateCosPhi();
+    }
+}
 
 bool bDataProcessingHisto(char *au8Command,char *au8Value, uint8_t au8Pos)
 {
@@ -100,6 +181,7 @@ bool bDataProcessingHisto(char *au8Command,char *au8Value, uint8_t au8Pos)
     holdingRegisters[1006] = (uint16_t)(tmp >> 16 ) & 0xFFFF;
     holdingRegisters[1005] = (uint16_t)(tmp >> 32 ) & 0xFFFF;
     holdingRegisters[1004] = (uint16_t)(tmp >> 48 ) & 0xFFFF;
+    s_hchc_wh = (uint64_t)tmp; histoEnergyUpdate();
     Serial.print("BASE : ");
     Serial.println(tmp);
   }else if (memcmp(au8Command,"HHPHC",5)==0)
@@ -133,6 +215,7 @@ bool bDataProcessingHisto(char *au8Command,char *au8Value, uint8_t au8Pos)
     holdingRegisters[1006] = (uint16_t)(tmp >> 16 ) & 0xFFFF;
     holdingRegisters[1005] = (uint16_t)(tmp >> 32 ) & 0xFFFF;
     holdingRegisters[1004] = (uint16_t)(tmp >> 48 ) & 0xFFFF;
+    s_hchc_wh = (uint64_t)tmp; histoEnergyUpdate();
     Serial.print("HCHC : ");
     Serial.println(tmp);
   }else if (memcmp(au8Command,"HCHP",4)==0)
@@ -143,6 +226,7 @@ bool bDataProcessingHisto(char *au8Command,char *au8Value, uint8_t au8Pos)
     holdingRegisters[1010] = (uint16_t)(tmp >> 16 ) & 0xFFFF;
     holdingRegisters[1009] = (uint16_t)(tmp >> 32 ) & 0xFFFF;
     holdingRegisters[1008] = (uint16_t)(tmp >> 48 ) & 0xFFFF;
+    s_hchp_wh = (uint64_t)tmp; histoEnergyUpdate();
     Serial.print("HCHP : ");
     Serial.println(tmp);
   }else if (memcmp(au8Command,"EJPHN",5)==0)
@@ -153,6 +237,7 @@ bool bDataProcessingHisto(char *au8Command,char *au8Value, uint8_t au8Pos)
     holdingRegisters[1006] = (uint16_t)(tmp >> 16 ) & 0xFFFF;
     holdingRegisters[1005] = (uint16_t)(tmp >> 32 ) & 0xFFFF;
     holdingRegisters[1004] = (uint16_t)(tmp >> 48 ) & 0xFFFF;
+    s_hchc_wh = (uint64_t)tmp; histoEnergyUpdate();
     Serial.print("EJPHN : ");
     Serial.println(tmp);
   }else if (memcmp(au8Command,"EJPHPM",6)==0)
@@ -163,6 +248,7 @@ bool bDataProcessingHisto(char *au8Command,char *au8Value, uint8_t au8Pos)
     holdingRegisters[1010] = (uint16_t)(tmp >> 16 ) & 0xFFFF;
     holdingRegisters[1009] = (uint16_t)(tmp >> 32 ) & 0xFFFF;
     holdingRegisters[1008] = (uint16_t)(tmp >> 48 ) & 0xFFFF;
+    s_hchp_wh = (uint64_t)tmp; histoEnergyUpdate();
     Serial.print("EJPHPM : ");
     Serial.println(tmp);
   }else if (memcmp(au8Command,"BBRHCJB",7)==0)
@@ -173,6 +259,7 @@ bool bDataProcessingHisto(char *au8Command,char *au8Value, uint8_t au8Pos)
     holdingRegisters[1006] = (uint16_t)(tmp >> 16 ) & 0xFFFF;
     holdingRegisters[1005] = (uint16_t)(tmp >> 32 ) & 0xFFFF;
     holdingRegisters[1004] = (uint16_t)(tmp >> 48 ) & 0xFFFF;
+    s_hchc_wh = (uint64_t)tmp; histoEnergyUpdate();
     Serial.print("BBRHCJB : ");
     Serial.println(tmp);
   }else if (memcmp(au8Command,"BBRHPJB",7)==0)
@@ -183,6 +270,7 @@ bool bDataProcessingHisto(char *au8Command,char *au8Value, uint8_t au8Pos)
     holdingRegisters[1010] = (uint16_t)(tmp >> 16 ) & 0xFFFF;
     holdingRegisters[1009] = (uint16_t)(tmp >> 32 ) & 0xFFFF;
     holdingRegisters[1008] = (uint16_t)(tmp >> 48 ) & 0xFFFF;
+    s_hchp_wh = (uint64_t)tmp; histoEnergyUpdate();
     Serial.print("BBRHPJB : ");
     Serial.println(tmp);
   }else if (memcmp(au8Command,"BBRHCJW",7)==0)
@@ -193,7 +281,7 @@ bool bDataProcessingHisto(char *au8Command,char *au8Value, uint8_t au8Pos)
     holdingRegisters[1014] = (uint16_t)(tmp >> 16 ) & 0xFFFF;
     holdingRegisters[1013] = (uint16_t)(tmp >> 32 ) & 0xFFFF;
     holdingRegisters[1012] = (uint16_t)(tmp >> 48 ) & 0xFFFF;
-
+    s_hchcjw_wh = (uint64_t)tmp; histoEnergyUpdate();
     Serial.print("BBRHCJW : ");
     Serial.println(tmp);
   }else if (memcmp(au8Command,"BBRHPJW",7)==0)
@@ -204,7 +292,7 @@ bool bDataProcessingHisto(char *au8Command,char *au8Value, uint8_t au8Pos)
     holdingRegisters[1018] = (uint16_t)(tmp >> 16 ) & 0xFFFF;
     holdingRegisters[1017] = (uint16_t)(tmp >> 32 ) & 0xFFFF;
     holdingRegisters[1016] = (uint16_t)(tmp >> 48 ) & 0xFFFF;
-
+    s_hchpjw_wh = (uint64_t)tmp; histoEnergyUpdate();
     Serial.print("BBRHPJW : ");
     Serial.println(tmp);
   }else if (memcmp(au8Command,"BBRHCJR",7)==0)
@@ -215,7 +303,7 @@ bool bDataProcessingHisto(char *au8Command,char *au8Value, uint8_t au8Pos)
     holdingRegisters[1022] = (uint16_t)(tmp >> 16 ) & 0xFFFF;
     holdingRegisters[1021] = (uint16_t)(tmp >> 32 ) & 0xFFFF;
     holdingRegisters[1020] = (uint16_t)(tmp >> 48 ) & 0xFFFF;
-    
+    s_hchcjr_wh = (uint64_t)tmp; histoEnergyUpdate();
     Serial.print("BBRHCJR : ");
     Serial.println(tmp);
   }else if (memcmp(au8Command,"BBRHPJR",7)==0)
@@ -226,7 +314,7 @@ bool bDataProcessingHisto(char *au8Command,char *au8Value, uint8_t au8Pos)
     holdingRegisters[1026] = (uint16_t)(tmp >> 16 ) & 0xFFFF;
     holdingRegisters[1025] = (uint16_t)(tmp >> 32 ) & 0xFFFF;
     holdingRegisters[1024] = (uint16_t)(tmp >> 48 ) & 0xFFFF;
-
+    s_hchpjr_wh = (uint64_t)tmp; histoEnergyUpdate();
     Serial.print("BBRHPJR : ");
     Serial.println(tmp);
   }else if (memcmp(au8Command,"IINST1",6)==0)
@@ -320,6 +408,7 @@ bool bDataProcessingHisto(char *au8Command,char *au8Value, uint8_t au8Pos)
     // Historic meters have no URMS1; s_urms1_v stays at its default (230 V)
     s_sinsts_va = (uint32_t)(tmp > 0xFFFFFFFF ? 0xFFFFFFFF : (uint32_t)tmp);
     seUpdatePreciseCurrent();
+    seUpdateCosPhi();
     Serial.print("PAPP : ");
     Serial.println(tmp);
   }else if (memcmp(au8Command,"PTEC",4)==0)
@@ -490,12 +579,13 @@ bool bDataProcessingStandard(char *au8Command,char *au8Value, uint8_t au8Pos)
 
   }else if (memcmp(au8Command,"EAST",4)==0)
   {
-    long long tmp = strtoull(au8Value,NULL,10);  
+    long long tmp = strtoull(au8Value,NULL,10);
 
     holdingRegisters[1003] = (uint16_t)tmp & 0xFFFF;
     holdingRegisters[1002] = (uint16_t)(tmp >> 16 ) & 0xFFFF;
     holdingRegisters[1001] = (uint16_t)(tmp >> 32 ) & 0xFFFF;
     holdingRegisters[1000] = (uint16_t)(tmp >> 48 ) & 0xFFFF;
+    standardEnergyUpdate((uint64_t)tmp);
 
     Serial.print("EAST : ");
     Serial.println(tmp);
@@ -887,12 +977,14 @@ bool bDataProcessingStandard(char *au8Command,char *au8Value, uint8_t au8Pos)
 
   }else if (memcmp(au8Command,"CCASN",5)==0)
   {
-    long long tmp = strtoull(au8Value,NULL,10);  
+    long long tmp = strtoull(au8Value,NULL,10);
 
     holdingRegisters[1507] = (uint16_t)tmp & 0xFFFF;
     holdingRegisters[1506] = (uint16_t)(tmp >> 16 ) & 0xFFFF;
     holdingRegisters[1505] = (uint16_t)(tmp >> 32 ) & 0xFFFF;
     holdingRegisters[1504] = (uint16_t)(tmp >> 48 ) & 0xFFFF;
+    s_ccasn_w = (uint32_t)(tmp > 0xFFFFFFFF ? 0xFFFFFFFF : (uint32_t)tmp);
+    seUpdateCosPhi();
     Serial.print("CCASN: ");
     Serial.println(tmp);
     if (au8Pos != 3)
@@ -1013,6 +1105,7 @@ bool bDataProcessingStandard(char *au8Command,char *au8Value, uint8_t au8Pos)
     seWriteInt32(SE_PAPP_REG, (int32_t)(tmp > 0x7FFFFFFF ? 0x7FFFFFFF : (int32_t)tmp));
     s_sinsts_va = (uint32_t)(tmp > 0xFFFFFFFF ? 0xFFFFFFFF : (uint32_t)tmp);
     seUpdatePreciseCurrent();
+    seUpdateCosPhi();
 
     Serial.print("SINSTS : ");
     Serial.println(tmp);

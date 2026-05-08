@@ -28,18 +28,26 @@ AsyncWebServer serverWeb(80);
 
 #define UPD_FILE "https://github.com/fairecasoimeme/TIC-DIN-MODBUS/releases/latest/download/tic-din-modbus.bin"
 
-const char HTTP_HELP[] PROGMEM = 
- "<h1>Help !</h1>"
+const char HTTP_HELP[] PROGMEM =
+    "<h1>Help</h1>"
     "<h3>Version : {{version}}</h3>"
-    "<h3>Shop & description</h3>"
-    "You can go to this url :</br>"
-    "<a href=\"https://lixee.fr/\" target='_blank'>Shop </a></br>"
-
-    "<h3>Firmware Source & Issues</h3>"
-    "Please go here :</br>"
-    "<a href=\"https://github.com/fairecasoimeme/TIC-DIN-MODBUS\" target='_blank'>Sources</a>"
-    
-    
+    "<h3>About this firmware</h3>"
+    "This is a <strong>custom fork</strong> of the original TIC-DIN-MODBUS firmware, adding native support for"
+    " <strong>SmartEVSE v3.1 dynamic load balancing</strong> using the Linky meter as the mains meter."
+    "<br><br>Additional features over the original:<ul>"
+    "<li>SmartEVSE Custom Meter register block at addresses <strong>0&ndash;34</strong></li>"
+    "<li>High-precision sub-ampere current estimate (SINSTS &divide; URMS, registers 20&ndash;31)</li>"
+    "<li>Power factor / cos &phi; estimate from CCASN &divide; SINSTS (registers 32&ndash;34)</li>"
+    "<li>All standard TIC registers visible in the status page</li>"
+    "</ul>"
+    "<h3>Shop &amp; hardware</h3>"
+    "<a href=\"https://lixee.fr/\" target='_blank'>lixee.fr</a><br><br>"
+    "<h3>Fork source &amp; issues</h3>"
+    "<a href=\"https://github.com/francois-baptiste/tic-din-modbus-smartevse\" target='_blank'>"
+    "github.com/francois-baptiste/tic-din-modbus-smartevse</a><br><br>"
+    "<h3>Original project</h3>"
+    "<a href=\"https://github.com/fairecasoimeme/TIC-DIN-MODBUS\" target='_blank'>"
+    "github.com/fairecasoimeme/TIC-DIN-MODBUS</a>"
     ;
 
 const char HTTP_HEADER[] PROGMEM =
@@ -462,6 +470,8 @@ void handleStatusNetwork(AsyncWebServerRequest *request)
   rowU16("28 I L2 (A\xc3\x97""100) :", 28);
   rowF32("29-30 I L3 (FLOAT32) :", 29);
   rowU16("31 I L3 (A\xc3\x97""100) :", 31);
+  rowF32("32-33 cos\xcf\x86""  total (FLOAT32) :", 32);
+  rowU16("34 cos\xcf\x86""  total (\xc3\x97""1000) :", 34);
 
   // TIC Modbus Mapping
   response->print(F("<tr><td colspan='2'><strong>&mdash; TIC Modbus Mapping &mdash;</strong></td></tr>"));
