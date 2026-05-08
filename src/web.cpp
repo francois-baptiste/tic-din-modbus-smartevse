@@ -436,6 +436,11 @@ void handleStatusNetwork(AsyncWebServerRequest *request)
     float f; memcpy(&f, &bits, 4);
     response->printf("<tr><td><strong>%s</strong></td><td>%.2f A</td></tr>", lbl, (double)f);
   };
+  auto rowF32dim = [&](const char* lbl, uint16_t base) {
+    uint32_t bits = ((uint32_t)holdingRegisters[base] << 16) | holdingRegisters[base + 1];
+    float f; memcpy(&f, &bits, 4);
+    response->printf("<tr><td><strong>%s</strong></td><td>%.4f</td></tr>", lbl, (double)f);
+  };
   auto rowU16 = [&](const char* lbl, uint16_t reg) {
     response->printf("<tr><td><strong>%s</strong></td><td>%u</td></tr>", lbl, (unsigned)holdingRegisters[reg]);
   };
@@ -470,7 +475,7 @@ void handleStatusNetwork(AsyncWebServerRequest *request)
   rowU16("28 I L2 (A\xc3\x97""100) :", 28);
   rowF32("29-30 I L3 (FLOAT32) :", 29);
   rowU16("31 I L3 (A\xc3\x97""100) :", 31);
-  rowF32("32-33 cos\xcf\x86""  total (FLOAT32) :", 32);
+  rowF32dim("32-33 cos\xcf\x86""  total (FLOAT32) :", 32);
   rowU16("34 cos\xcf\x86""  total (\xc3\x97""1000) :", 34);
 
   // TIC Modbus Mapping
