@@ -112,16 +112,20 @@ static void seUpdateCosPhi() {
 
 // applyEnergyDelta: compute P from a confirmed Wh increment and feed the EMA.
 // dt guard (500 ms) rejects anomalously fast back-to-back frames.
+// Stale gap (>60 s): reset EMA so next valid delta seeds fresh (avoids near-zero
+// first-sample from a large idle gap poisoning the average).
+// Large load change (P_raw > 2× or < 0.5× EMA): re-seed directly for fast response.
 static void applyEnergyDelta(uint64_t delta_wh, uint32_t now_ms) {
     uint32_t dt = now_ms - s_energy_ms;
     s_energy_ms = now_ms;
     if (dt < 500 || delta_wh == 0) return;
+    if (dt > 60000u) { s_power_ema_w = 0.0f; return; }
     float P_raw = (float)delta_wh * 3600000.0f / (float)dt;
     const float alpha = 0.25f;
-    // Seed directly on first sample so the output is usable immediately.
-    s_power_ema_w = (s_power_ema_w > 0.0f)
-                    ? (alpha * P_raw + (1.0f - alpha) * s_power_ema_w)
-                    : P_raw;
+    if (s_power_ema_w == 0.0f || P_raw > s_power_ema_w * 2.0f || P_raw < s_power_ema_w * 0.5f)
+        s_power_ema_w = P_raw;
+    else
+        s_power_ema_w = alpha * P_raw + (1.0f - alpha) * s_power_ema_w;
 }
 
 // standardEnergyUpdate: called on every incoming EAST frame.
