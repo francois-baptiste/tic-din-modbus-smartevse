@@ -37,7 +37,7 @@ const char HTTP_HELP[] PROGMEM =
     "<br><br>Additional features over the original:<ul>"
     "<li>SmartEVSE Custom Meter register block at addresses <strong>0&ndash;34</strong></li>"
     "<li>High-precision sub-ampere current estimate (SINSTS &divide; URMS, registers 20&ndash;31)</li>"
-    "<li>Power factor / cos &phi; estimate from CCASN &divide; SINSTS (registers 32&ndash;34)</li>"
+    "<li>Power factor / cos &phi; from energy-index derivative &divide; SINSTS (registers 32&ndash;34)</li>"
     "<li>All standard TIC registers visible in the status page</li>"
     "</ul>"
     "<h3>Shop &amp; hardware</h3>"
