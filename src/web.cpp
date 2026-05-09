@@ -1153,14 +1153,17 @@ void handleScanNetwork(AsyncWebServerRequest * request)
       result += "<input class='form-control' id='ssid' type='text' name='WIFISSID' value='{{ssid}}'> <a onclick='scanNetwork();' class='btn btn-primary mb-2'>Scan</a><div id='networks'></div>";
     } else {
       
+       result.reserve(102 + n * 100);
        result = "<select name='WIFISSID' onChange='updateSSID(this.value);'>";
        result += "<OPTION value=''>--Choose SSID--</OPTION>";
        for (int i = 0; i < n; ++i) {
             result += "<OPTION value='";
             result +=WiFi.SSID(i);
             result +="'>";
-            result +=WiFi.SSID(i)+" ("+WiFi.RSSI(i)+")";
-            result+="</OPTION>";
+            result +=WiFi.SSID(i);
+            result +=" (";
+            result +=WiFi.RSSI(i);
+            result +=")</OPTION>";
         }
         result += "</select>";
     }  
