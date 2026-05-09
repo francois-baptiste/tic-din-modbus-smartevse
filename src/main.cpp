@@ -489,12 +489,6 @@ void setupWifiAP()
     strlcpy(ConfigSettings.ssid,AP_NameString.c_str(),sizeof(ConfigSettings.ssid));
   }
 
-  char AP_NameChar[AP_NameString.length() + 1];
-  memset(AP_NameChar, 0, AP_NameString.length() + 1);
-
-  for (int i=0; i<AP_NameString.length(); i++)
-    AP_NameChar[i] = AP_NameString.charAt(i);
-
   if (configOK)
   {
     String WIFIPASSSTR;
@@ -504,20 +498,10 @@ void setupWifiAP()
     }else{
       WIFIPASSSTR = "admin"+macID;
     }
-    char WIFIPASS[WIFIPASSSTR.length()+1];
-    memset(WIFIPASS,0,WIFIPASSSTR.length()+1);
-    for (int i=0; i<WIFIPASSSTR.length(); i++)
-      WIFIPASS[i] = WIFIPASSSTR.charAt(i);
-    
-    WiFi.softAP(AP_NameChar,WIFIPASS );
+    WiFi.softAP(AP_NameString.c_str(), WIFIPASSSTR.c_str());
   }else{
     String WIFIPASSSTR = "admin"+macID;
-    char WIFIPASS[WIFIPASSSTR.length()+1];
-    memset(WIFIPASS,0,WIFIPASSSTR.length()+1);
-    for (int i=0; i<WIFIPASSSTR.length(); i++)
-      WIFIPASS[i] = WIFIPASSSTR.charAt(i);
-    
-    WiFi.softAP(AP_NameChar,WIFIPASS );
+    WiFi.softAP(AP_NameString.c_str(), WIFIPASSSTR.c_str());
   }
  
   WiFi.setSleep(false);
