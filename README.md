@@ -24,7 +24,7 @@ It is based on **ESP32-C3** module and a **MAX485** chip for the RS485 interface
 <img src="https://github.com/fairecasoimeme/TIC-DIN-MODBUS/blob/master/Doc/images/tic-din-modbus-rtu-rs485.jpg" width="600">
 
 ### RS485 pins
-- VIN (5 - 12VDC)
+- VIN (5VDC)
 - A (+)
 - B (-)
 - GND
@@ -111,7 +111,7 @@ Please open a browser with this IP address : http://192.168.4.1 to connect to th
 |Standard|NGTF	|	2000-2099         |
 |Standard|LTARF|	2100-2199       |
 |Standard|DATE	|	3000-3099   |
-|Standard|STGE	|	4000-4099   |
+|Standard|STGE|4000-4099|
 |Standard|EAST	|	1000-1003       |
 |Standard|EASF01	|	1004-1007   |
 |Standard|EASF02	|	1008-1011   |
