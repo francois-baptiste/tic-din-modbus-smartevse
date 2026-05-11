@@ -21,6 +21,7 @@
 
 extern struct ConfigSettingsStruct ConfigSettings;
 extern uint16_t holdingRegisters[24600];
+extern uint16_t sdm630InputRegisters[60];
 
 HTTPClient clientWeb;
 
@@ -35,11 +36,14 @@ const char HTTP_HELP[] PROGMEM =
     "This is a <strong>custom fork</strong> of the original TIC-DIN-MODBUS firmware, adding native support for"
     " <strong>SmartEVSE v3.1 dynamic load balancing</strong> using the Linky meter as the mains meter."
     "<br><br>Additional features over the original:<ul>"
-    "<li>SmartEVSE Custom Meter register block at addresses <strong>0&ndash;34</strong></li>"
-    "<li>High-precision sub-ampere current estimate (SINSTS &divide; URMS, registers 20&ndash;31)</li>"
-    "<li>Power factor / cos &phi; from energy-index derivative &divide; SINSTS (registers 32&ndash;34)</li>"
+    "<li><strong>Eastron SDM630 emulation</strong> via FC=04 input registers &mdash; set SmartEVSE to &ldquo;Eastron SDM630&rdquo; meter type (recommended)</li>"
+    "<li>SmartEVSE Custom Meter register block at addresses <strong>0&ndash;34</strong> via FC=03 (alternative)</li>"
+    "<li>High-precision sub-ampere current estimate (SINSTS &divide; URMS)</li>"
+    "<li>Power factor / cos &phi; from energy-index derivative &divide; SINSTS</li>"
     "<li>All standard TIC registers visible in the status page</li>"
     "</ul>"
+    "<h3>SmartEVSE configuration (recommended)</h3>"
+    "Set meter type to <strong>Eastron SDM630</strong>, Modbus address = slave ID shown in Config &rarr; General."
     "<h3>Shop &amp; hardware</h3>"
     "<a href=\"https://lixee.fr/\" target='_blank'>lixee.fr</a><br><br>"
     "<h3>Fork source &amp; issues</h3>"
@@ -443,8 +447,8 @@ void handleStatusNetwork(AsyncWebServerRequest *request)
     response->print(F("</td></tr>"));
   };
 
-  // SmartEVSE Custom Meter (regs 0-31)
-  response->print(F("<tr><td colspan='2'><strong>&mdash; SmartEVSE Custom Meter (regs 0-31) &mdash;</strong></td></tr>"));
+  // SmartEVSE Custom Meter (FC=03, regs 0-34)
+  response->print(F("<tr><td colspan='2'><strong>&mdash; SmartEVSE Custom Meter FC=03 (regs 0&ndash;34) &mdash;</strong></td></tr>"));
   rowI32("0-1 IRMS1 (mA) :", 0);
   rowI32("2-3 IRMS2 (mA) :", 2);
   rowI32("4-5 IRMS3 (mA) :", 4);
@@ -465,6 +469,32 @@ void handleStatusNetwork(AsyncWebServerRequest *request)
   rowU16("31 I L3 (A\xc3\x97""100) :", 31);
   rowF32dim("32-33 cos\xcf\x86""  total (FLOAT32) :", 32);
   rowU16("34 cos\xcf\x86""  total (\xc3\x97""1000) :", 34);
+
+  // Eastron SDM630 input registers (FC=04)
+  response->print(F("<tr><td colspan='2'><strong>&mdash; Eastron SDM630 FC=04 (input regs) &mdash;</strong></td></tr>"));
+  auto sdm630F = [&](const char* lbl, uint16_t base, const char* unit) {
+    uint32_t bits = ((uint32_t)sdm630InputRegisters[base] << 16) | sdm630InputRegisters[base + 1];
+    float f; memcpy(&f, &bits, 4);
+    response->printf("<tr><td><strong>%s</strong></td><td>%.2f %s</td></tr>", lbl, (double)f, unit);
+  };
+  sdm630F("0-1 Voltage L1 :",   0,  "V");
+  sdm630F("2-3 Voltage L2 :",   2,  "V");
+  sdm630F("4-5 Voltage L3 :",   4,  "V");
+  sdm630F("6-7 Current L1 :",   6,  "A");
+  sdm630F("8-9 Current L2 :",   8,  "A");
+  sdm630F("10-11 Current L3 :", 10, "A");
+  sdm630F("12-13 Active pwr L1 :", 12, "W");
+  sdm630F("14-15 Active pwr L2 :", 14, "W");
+  sdm630F("16-17 Active pwr L3 :", 16, "W");
+  sdm630F("18-19 Apparent pwr L1 :", 18, "VA");
+  sdm630F("20-21 Apparent pwr L2 :", 20, "VA");
+  sdm630F("22-23 Apparent pwr L3 :", 22, "VA");
+  sdm630F("30-31 PF L1 :", 30, "");
+  sdm630F("32-33 PF L2 :", 32, "");
+  sdm630F("34-35 PF L3 :", 34, "");
+  sdm630F("52-53 Total active pwr :", 52, "W");
+  sdm630F("56-57 Total apparent pwr :", 56, "VA");
+  sdm630F("58-59 Total PF :", 58, "");
 
   // TIC Modbus Mapping
   response->print(F("<tr><td colspan='2'><strong>&mdash; TIC Modbus Mapping &mdash;</strong></td></tr>"));

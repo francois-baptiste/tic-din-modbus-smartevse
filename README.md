@@ -6,21 +6,33 @@
 
 ## Purpose of this fork
 
-The original TIC-DIN-MODBUS firmware exposes Linky TIC data over Modbus RTU, but its register layout does not match the format expected by SmartEVSE v3.1's "Custom" mains meter input.
+The original TIC-DIN-MODBUS firmware exposes Linky TIC data over Modbus RTU, but its register layout does not match the format expected by SmartEVSE v3.1.
 
-This fork adds a **SmartEVSE mirror register block** at addresses **0–34** that SmartEVSE can read directly without any scaling configuration beyond standard INT32/FLOAT32 types:
+This fork adds native SmartEVSE v3.1 compatibility via **two parallel Modbus register spaces** served simultaneously on the same slave address:
 
-| Feature | Registers | Detail |
-|---------|-----------|--------|
-| Current L1/L2/L3 | 0–5 | INT32, mA |
-| Voltage L1/L2/L3 | 6–11 | INT32, V×10 |
-| Apparent power total + per phase | 12–19 | INT32, VA |
-| High-precision current total + per phase | 20–31 | FLOAT32 + UINT16×100 |
-| Power factor cos φ (total) | 32–34 | FLOAT32 + UINT16×1000 |
+| Mode | FC | Addresses | Format | SmartEVSE meter type |
+|------|----|-----------|--------|----------------------|
+| **Eastron SDM630 emulation** *(recommended)* | FC=04 | 0–58 | IEEE 754 float32 | **Eastron SDM630** |
+| Custom Meter block | FC=03 | 0–34 | INT32 + FLOAT32 | Custom |
 
-**Precision current** (registers 20–31): derived from `SINSTS ÷ URMS`, giving sub-ampere resolution vs. the 1 A step of raw IRMS.
+**SDM630 emulation** (FC=04 input registers) is the recommended approach — set SmartEVSE to meter type **Eastron SDM630** and point it at the device address. No custom register mapping required.
 
-**Power factor / cos φ** (registers 32–34): derived from the rate of change of the active energy index (EAST / BASE / HC+HP) divided by the instantaneous apparent power (SINSTS / PAPP). Only the Wh ticks that actually increment are used, eliminating frame-rate noise. An EMA (α = 0.25) smooths the result. Falls back to CCASN when no energy increment has arrived in > 60 s. Per-phase cos φ is not available because TIC does not provide per-phase active power.
+| SDM630 register | Content | Source |
+|-----------------|---------|--------|
+| 0 / 2 / 4 | Voltage L1/L2/L3 (V) | URMS1/2/3 |
+| 6 / 8 / 10 | Current L1/L2/L3 (A) | SINSTS_n ÷ URMS_n |
+| 12 / 14 / 16 | Active power L1/L2/L3 (W) | SINSTS_n × cos φ |
+| 18 / 20 / 22 | Apparent power L1/L2/L3 (VA) | SINSTS1/2/3 |
+| 30 / 32 / 34 | Power factor L1/L2/L3 | global cos φ |
+| 52 | Total active power (W) | energy-delta EMA |
+| 56 | Total apparent power (VA) | SINSTS |
+| 58 | Total power factor | global cos φ |
+
+**Custom Meter block** (FC=03, registers 0–34): kept for compatibility and for use cases requiring INT32 or the full FLOAT32/UINT16 precise-current registers. See the [Custom Meter section](#custom-meter-mode-alternative) below for the full register map.
+
+**Precision current**: derived from `SINSTS ÷ URMS`, giving sub-ampere resolution vs. the 1 A step of raw IRMS.
+
+**Power factor / cos φ**: derived from the rate of change of the active energy index (EAST / BASE / HC+HP) divided by SINSTS. Only Wh ticks that actually increment are used (no quantisation noise). An EMA (α = 0.25) smooths the result. Falls back to CCASN when no energy increment has arrived in > 60 s.
 
 See the [SmartEVSE v3.1 section](#smartevse-v31--dynamic-load-balancing-linky-as-mains-meter) below for wiring and configuration details.
 
@@ -252,13 +264,73 @@ Click to **"save"** to validate
 
 ## SmartEVSE v3.1 — Dynamic Load Balancing (Linky as mains meter)
 
-This fork adds native compatibility with [SmartEVSE v3.1](https://github.com/SmartEVSE/SmartEVSE-3) dynamic load balancing. The device exposes a **SmartEVSE mirror register block** at addresses **0–19** that SmartEVSE can read directly as a Custom meter.
+This fork adds native compatibility with [SmartEVSE v3.1](https://github.com/SmartEVSE/SmartEVSE-3) dynamic load balancing. Two register spaces are served simultaneously on the same Modbus slave address — choose the one that matches your SmartEVSE meter type setting.
 
-### Mirror register block (registers 0–34)
+### Wiring
 
-Registers 0–19 are **signed INT32, big-endian (high word first)**, FC=3 (holding registers).  
-Registers 20–31 add **high-precision current** (FLOAT32 + UINT16×100).  
-Registers 32–34 add **power factor / cos φ** (FLOAT32 + UINT16×1000).
+Connect the TIC-DIN-MODBUS RS485 A/B terminals to the same RS485 bus as the SmartEVSE. Both devices share 9600 baud 8N1.
+
+---
+
+### Recommended: Eastron SDM630 mode (FC=04)
+
+The simplest configuration. The device emulates an Eastron SDM630 on FC=04 (Read Input Registers). All values are IEEE 754 float32, big-endian — no divisor setup required.
+
+In the SmartEVSE menu (`CONFIG → Meter → Mains`), select **Eastron SDM630**:
+
+| SmartEVSE parameter | Value |
+|---------------------|-------|
+| Meter type | **Eastron SDM630** |
+| Modbus address | **11** *(matches TIC-DIN-MODBUS default)* |
+| Baud rate / parity | match device settings (default 9600, None) |
+
+**SDM630 input register map** (FC=04, all values float32):
+
+| Address | Content | Unit | Source |
+|---------|---------|------|--------|
+| 0 / 2 / 4 | Voltage L1/L2/L3 | V | URMS1/2/3 |
+| 6 / 8 / 10 | Current L1/L2/L3 | A | SINSTS_n ÷ URMS_n |
+| 12 / 14 / 16 | Active power L1/L2/L3 | W | SINSTS_n × cos φ |
+| 18 / 20 / 22 | Apparent power L1/L2/L3 | VA | SINSTS1/2/3 |
+| 30 / 32 / 34 | Power factor L1/L2/L3 | — | global cos φ |
+| 52 | Total active power | W | energy-delta EMA |
+| 56 | Total apparent power | VA | SINSTS |
+| 58 | Total power factor | — | global cos φ |
+
+Verify with modpoll (FC=04 = `-t 3`):
+
+```
+modpoll -m rtu -a 11 -r 1 -c 12 -t 3 /dev/ttyUSB0
+```
+
+Registers 6–10 (currents) and 0–4 (voltages) should show non-zero values as soon as the Linky is transmitting.
+
+---
+
+### Alternative: Custom Meter mode (FC=03) {#custom-meter-mode-alternative}
+
+Use this if you prefer the SmartEVSE **Custom** meter type, or need INT32 format registers.
+
+In the SmartEVSE menu (`CONFIG → Meter → Mains`), select **Custom** and apply these settings:
+
+| SmartEVSE parameter | Value | Notes |
+|---------------------|-------|-------|
+| Modbus address | **11** | matches TIC-DIN-MODBUS default |
+| Function | **3** | holding registers (FC=03) |
+| Data type | **INT32** | 32-bit signed integer |
+| Endianness | **HBF & HWF** (value 3) | big-endian, high word first |
+| Current register (I) | **0** | L1/L2/L3 at 0–1, 2–3, 4–5 |
+| Current divisor (I) | **3** | mA ÷ 10³ = A |
+| Voltage register (U) | **6** | L1/L2/L3 at 6–7, 8–9, 10–11 |
+| Voltage divisor (U) | **1** | V×10 ÷ 10 = V |
+| Power register (P) | **14** | L1/L2/L3 at 14–15, 16–17, 18–19 |
+| Power divisor (P) | **0** | VA (used as W approximation) |
+
+**FC=03 holding register map (registers 0–34):**
+
+Registers 0–19: signed INT32, big-endian (high word first).  
+Registers 20–31: high-precision current (FLOAT32 + UINT16×100).  
+Registers 32–34: power factor / cos φ (FLOAT32 + UINT16×1000).
 
 | Registers | Content | Format | Unit | Source |
 |-----------|---------|--------|------|--------|
@@ -285,85 +357,49 @@ Registers 32–34 add **power factor / cos φ** (FLOAT32 + UINT16×1000).
 
 > **Historic single-phase meters**: L1 carries IINST and PAPP; L2/L3 are set to 0. URMS1/2/3 default to 230 V since historic frames do not transmit voltage.
 
-### High-precision current (registers 20–31)
+**High-precision current** (registers 20–31): derived from `SINSTS ÷ URMS`, sub-ampere resolution vs. the 1 A step of IRMS.
 
-IRMS1/IINST carry only whole-ampere values (1 A resolution). This register block provides a sub-ampere current estimate derived from apparent power and voltage, updated at every SINSTS or URMS frame:
-
-```
-Total current = SINSTS  (VA) / URMS1 (V)    fallback denominator: 230 V if URMS = 0
-L1 current    = SINSTS1 (VA) / URMS1 (V)
-L2 current    = SINSTS2 (VA) / URMS2 (V)
-L3 current    = SINSTS3 (VA) / URMS3 (V)
-```
-
-**Option A — Float32 (2 registers each)**  
-IEEE 754 single-precision float, big-endian (high word first). SmartEVSE config:
-- Data type: `FLOAT32`, Endianness: `HBF & HWF` (3), divisor: `0`
-- Use register `20` for total, `23` for L1, `26` for L2, `29` for L3
-
-**Option B — Scaled UInt16 (1 register each)**  
-Value = `round(current × 100)`, e.g. 15.42 A → 1542. SmartEVSE config:
-- Data type: `INT16`, divisor: `2` (÷ 100 → A)
-- Use register `22` for total, `25` for L1, `28` for L2, `31` for L3
-
-> Precision is bounded by the Linky's 1 VA / 1 V resolution (~0.4% at 230 V, 10 A) — significantly finer than the 1 A step of IRMS1/IINST.
-
-### Power factor / cos φ (registers 32–34)
-
-The power factor is estimated from the rate of change of the **active energy index** (EAST in standard mode; BASE, HCHC+HCHP, or Tempo sub-indices in historic mode) divided by the instantaneous apparent power.
+**Power factor / cos φ** (registers 32–34):
 
 ```
-P_raw  = ΔWh × 3,600,000 / Δt_ms        (W, computed only when the Wh index increments)
-P_ema  = 0.25 × P_raw + 0.75 × P_ema    (exponential moving average, α = 0.25)
-cos φ  = P_ema / SINSTS (or PAPP)        (clamped to [0, 1])
+P_raw  = ΔWh × 3,600,000 / Δt_ms        (W, only when the Wh index increments)
+P_ema  = 0.25 × P_raw + 0.75 × P_ema    (EMA, α = 0.25)
+cos φ  = P_ema / SINSTS                  (clamped to [0, 1])
 ```
 
-Key properties:
-- **Only Wh ticks are used** — frames where the energy index does not change do not move `Δt`, so no quantisation noise accumulates during constant-power periods.
-- **EMA seeded directly** on the first sample to avoid a slow ramp-up from zero.
-- **Timeout fallback** — if no energy increment has arrived in > 60 s (load < ~60 W), the register falls back to CCASN (if available in standard mode) or 0, rather than becoming stale.
-- **Per-phase cos φ is not available** — the Linky does not provide per-phase active power.
+Falls back to CCASN when no energy increment has arrived in > 60 s. Per-phase cos φ is not available (TIC does not provide per-phase active power).
 
-**Reading with SmartEVSE or a Modbus master:**
-- Register 32–33: `FLOAT32`, big-endian (HBF & HWF), value range 0.0–1.0
-- Register 34: `UINT16`, value = `round(cos φ × 1000)` — e.g. 956 → cos φ = 0.956
-
-### Wiring
-
-Connect the TIC-DIN-MODBUS RS485 A/B terminals to the same RS485 bus as the SmartEVSE. Both devices share 9600 baud 8N1.
-
-### SmartEVSE v3.1 Custom Meter configuration
-
-In the SmartEVSE menu (`CONFIG → Meter → Mains`), select **Custom** and apply these settings:
-
-| SmartEVSE parameter | Value | Notes |
-|---------------------|-------|-------|
-| Modbus address | **11** | matches TIC-DIN-MODBUS default |
-| Function | **3** | holding registers (FC=03) |
-| Data type | **INT32** | 32-bit signed integer |
-| Endianness | **HBF & HWF** (value 3) | big-endian, high word first |
-| Current register (I) | **0** | L1/L2/L3 at 0–1, 2–3, 4–5 |
-| Current divisor (I) | **3** | mA ÷ 10³ = A |
-| Voltage register (U) | **6** | L1/L2/L3 at 6–7, 8–9, 10–11 |
-| Voltage divisor (U) | **1** | V×10 ÷ 10 = V |
-| Power register (P) | **14** | L1/L2/L3 at 14–15, 16–17, 18–19 |
-| Power divisor (P) | **0** | VA (used as W approximation) |
-
-> **Note on apparent vs. active power**: Linky reports apparent power (VA), not active power (W). For purely resistive loads the difference is negligible. For installations with significant reactive loads, SINSTS will slightly overestimate the load seen by SmartEVSE, which is the safe (conservative) direction for load balancing.
-
-### Verify communication
-
-Use a Modbus RTU master tool (e.g. `modpoll`, Modbus Poll app) to confirm the TIC-DIN-MODBUS answers on address 11 before configuring SmartEVSE:
+Verify with modpoll (FC=03 = `-t 4`):
 
 ```
 modpoll -m rtu -a 11 -r 1 -c 35 -t 4 /dev/ttyUSB0
 ```
 
-Registers 0–19 should show non-zero values once the Linky meter is transmitting. Registers 20–31 (precise current) update on every SINSTS or URMS frame. Registers 32–34 (cos φ) update whenever the active energy index increments (every few seconds at typical residential loads).
-
 ---
 
 ## Changelog
+
+### Version v1.15-smartevse
+* Add Eastron SDM630 emulation via FC=04 input registers (60 words)
+  * SmartEVSE can now be configured as "Eastron SDM630" meter type — no custom register mapping needed
+  * SDM630 registers populated from TIC data: voltages (0/2/4), currents (6/8/10), active power (12/14/16), apparent power (18/20/22), power factors (30/32/34), total active power (52), total apparent power (56), total power factor (58)
+  * Both FC=03 (custom meter) and FC=04 (SDM630) served simultaneously on the same slave address
+
+### Version v1.14-smartevse
+* STGE bit decoding: injection flag (bit 4), overload flag (bit 6), producer mode flag (bit 7) → registers 35/36/37
+* EAST rollback guard: re-seeds EMA baseline on counter reset instead of using stale negative delta
+* 3-phase voltage averaging for total precise current when all three URMS values are available
+
+### Version v1.13-smartevse
+* Performance fixes and bug fixes
+
+### Version v1.12-smartevse
+* Standard-mode only parser (historic mode removed)
+* Label dispatch table replaces linear string search
+* Merged parsers: single unified TIC frame parser
+
+### Version v1.11-smartevse
+* Minor stability improvements
 
 ### Version v1.10-smartevse
 * Refactor cos φ computation to energy-delta method (replaces CCASN÷SINSTS)
