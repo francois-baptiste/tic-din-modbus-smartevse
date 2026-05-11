@@ -48,6 +48,11 @@ static void seWriteInt32(uint16_t reg, int32_t value) {
 #define SE_COSPHI_FLOAT_REG      32
 #define SE_COSPHI_U16_REG        34
 
+// STGE decoded flags (one register each, 0/1)
+#define SE_STGE_INJECT_REG       35   // bit 4: 0=consumption, 1=injection
+#define SE_STGE_OVERLOAD_REG     36   // bit 6: 0=OK, 1=over contracted power
+#define SE_STGE_PRODUCER_REG     37   // bit 7: 0=consumer, 1=producer mode
+
 static uint32_t s_sinsts_va  = 0;
 static uint32_t s_sinsts1_va = 0;
 static uint32_t s_sinsts2_va = 0;
@@ -55,6 +60,8 @@ static uint32_t s_sinsts3_va = 0;
 static uint16_t s_urms1_v    = 230;
 static uint16_t s_urms2_v    = 230;
 static uint16_t s_urms3_v    = 230;
+static bool     s_urms2_set  = false;
+static bool     s_urms3_set  = false;
 static uint32_t s_ccasn_w    = 0;
 
 // ── Energy-delta active power estimation ─────────────────────────────────────
@@ -77,7 +84,12 @@ static void seWritePreciseCurrent(uint16_t float_reg, uint16_t u16_reg, uint32_t
     holdingRegisters[u16_reg] = (uint16_t)(a * 100.0f + 0.5f);
 }
 
-static void seUpdatePreciseCurrent()   { seWritePreciseCurrent(SE_PRECISE_I_FLOAT_REG,  SE_PRECISE_I_U16_REG,  s_sinsts_va,  s_urms1_v); }
+static void seUpdatePreciseCurrent() {
+    uint16_t v = (s_urms2_set && s_urms3_set)
+                 ? (uint16_t)((s_urms1_v + s_urms2_v + s_urms3_v) / 3)
+                 : s_urms1_v;
+    seWritePreciseCurrent(SE_PRECISE_I_FLOAT_REG, SE_PRECISE_I_U16_REG, s_sinsts_va, v);
+}
 static void seUpdatePreciseCurrentL1() { seWritePreciseCurrent(SE_PRECISE_I1_FLOAT_REG, SE_PRECISE_I1_U16_REG, s_sinsts1_va, s_urms1_v); }
 static void seUpdatePreciseCurrentL2() { seWritePreciseCurrent(SE_PRECISE_I2_FLOAT_REG, SE_PRECISE_I2_U16_REG, s_sinsts2_va, s_urms2_v); }
 static void seUpdatePreciseCurrentL3() { seWritePreciseCurrent(SE_PRECISE_I3_FLOAT_REG, SE_PRECISE_I3_U16_REG, s_sinsts3_va, s_urms3_v); }
@@ -117,6 +129,9 @@ static void standardEnergyUpdate(uint64_t wh) {
         applyEnergyDelta(wh - s_east_wh, now);
         s_east_wh = wh;
         seUpdateCosPhi();
+    } else if (s_east_wh > wh + 10000ULL) {
+        // Counter rollback (meter replacement or overflow) — re-seed from new baseline
+        s_east_wh = wh; s_east_init = false; s_power_ema_w = 0.0f;
     }
 }
 
@@ -144,6 +159,7 @@ enum TicSfx  : uint8_t {
     SFX_URMS1, SFX_URMS2, SFX_URMS3,
     SFX_SINSTS, SFX_SINSTS1, SFX_SINSTS2, SFX_SINSTS3,
     SFX_CCASN,
+    SFX_STGE,
 };
 
 struct TicEntry {
@@ -206,7 +222,7 @@ static const TicEntry s_table[] = {
     { "PREF",     1399,   TY_U16, SFX_NONE,    false },
     { "PCOUP",    1398,   TY_U16, SFX_NONE,    false },
     // Status register
-    { "STGE",     4000,   TY_STR, SFX_NONE,    false },
+    { "STGE",     4000,   TY_STR, SFX_STGE,    false },
     // Injection apparent power
     { "SINSTI",   1400,   TY_U64, SFX_NONE,    false },
     // Timestamped maximums/averages (require horodate)
@@ -269,11 +285,13 @@ static void dispatchSfx(TicSfx sfx, uint64_t v) {
         case SFX_URMS2:
             seWriteInt32(SE_URMS2_REG, (int32_t)v16 * 10);
             s_urms2_v = v16;
+            s_urms2_set = true;
             seUpdatePreciseCurrentL2();
             break;
         case SFX_URMS3:
             seWriteInt32(SE_URMS3_REG, (int32_t)v16 * 10);
             s_urms3_v = v16;
+            s_urms3_set = true;
             seUpdatePreciseCurrentL3();
             break;
         case SFX_SINSTS:
@@ -301,6 +319,13 @@ static void dispatchSfx(TicSfx sfx, uint64_t v) {
             s_ccasn_w = v32u;
             seUpdateCosPhi();
             break;
+        case SFX_STGE: {
+            uint32_t stge = (uint32_t)v;
+            holdingRegisters[SE_STGE_INJECT_REG]   = (stge >> 4) & 1u;
+            holdingRegisters[SE_STGE_OVERLOAD_REG] = (stge >> 6) & 1u;
+            holdingRegisters[SE_STGE_PRODUCER_REG] = (stge >> 7) & 1u;
+            break;
+        }
         default:
             break;
     }
@@ -350,6 +375,10 @@ bool bDataProcessingStandard(char *au8Command, char *au8Value, uint8_t au8Pos) {
             }
             case TY_STR:
                 if (e.reg != 0xFFFF) writeStr(e.reg, au8Value);
+                if (e.sfx != SFX_NONE) {
+                    uint64_t hv = (uint64_t)strtoull(au8Value, NULL, 16);
+                    dispatchSfx(e.sfx, hv);
+                }
                 break;
             case TY_NONE:
                 break;
