@@ -12,6 +12,7 @@ static uint8_t      s_crc_acc  = 0;   // running sum: label+TAB+horodate+TAB+val
 static uint8_t      s_crc_snap = 0;   // snapshot of s_crc_acc at the separator after value
 
 extern uint16_t             holdingRegisters[24600];
+extern uint16_t             sdm630InputRegisters[60];
 extern uint32_t             u32Timeout;
 extern uint8_t              u8ErrorDecode;
 extern ConfigSettingsStruct ConfigSettings;
@@ -28,6 +29,33 @@ extern ConfigSettingsStruct ConfigSettings;
 #define SE_PAPP1_REG  14  // L1 apparent power (VA)
 #define SE_PAPP2_REG  16  // L2 apparent power (VA)
 #define SE_PAPP3_REG  18  // L3 apparent power (VA)
+
+// ── Eastron SDM630 input register addresses (FC=04, IEEE 754 float32 big-endian)
+#define SDM630_L1_VOLTAGE          0
+#define SDM630_L2_VOLTAGE          2
+#define SDM630_L3_VOLTAGE          4
+#define SDM630_L1_CURRENT          6
+#define SDM630_L2_CURRENT          8
+#define SDM630_L3_CURRENT         10
+#define SDM630_L1_ACTIVE_POWER    12
+#define SDM630_L2_ACTIVE_POWER    14
+#define SDM630_L3_ACTIVE_POWER    16
+#define SDM630_L1_APPARENT_POWER  18
+#define SDM630_L2_APPARENT_POWER  20
+#define SDM630_L3_APPARENT_POWER  22
+#define SDM630_L1_POWER_FACTOR    30
+#define SDM630_L2_POWER_FACTOR    32
+#define SDM630_L3_POWER_FACTOR    34
+#define SDM630_TOTAL_ACTIVE_POWER 52
+#define SDM630_TOTAL_APPARENT_VA  56
+#define SDM630_TOTAL_POWER_FACTOR 58
+
+static void sdm630WriteFloat(uint16_t reg, float value) {
+    uint32_t bits;
+    memcpy(&bits, &value, 4);
+    sdm630InputRegisters[reg]     = (uint16_t)(bits >> 16);
+    sdm630InputRegisters[reg + 1] = (uint16_t)(bits & 0xFFFF);
+}
 
 static void seWriteInt32(uint16_t reg, int32_t value) {
     holdingRegisters[reg]     = (uint16_t)((value >> 16) & 0xFFFF);
@@ -90,9 +118,21 @@ static void seUpdatePreciseCurrent() {
                  : s_urms1_v;
     seWritePreciseCurrent(SE_PRECISE_I_FLOAT_REG, SE_PRECISE_I_U16_REG, s_sinsts_va, v);
 }
-static void seUpdatePreciseCurrentL1() { seWritePreciseCurrent(SE_PRECISE_I1_FLOAT_REG, SE_PRECISE_I1_U16_REG, s_sinsts1_va, s_urms1_v); }
-static void seUpdatePreciseCurrentL2() { seWritePreciseCurrent(SE_PRECISE_I2_FLOAT_REG, SE_PRECISE_I2_U16_REG, s_sinsts2_va, s_urms2_v); }
-static void seUpdatePreciseCurrentL3() { seWritePreciseCurrent(SE_PRECISE_I3_FLOAT_REG, SE_PRECISE_I3_U16_REG, s_sinsts3_va, s_urms3_v); }
+static void seUpdatePreciseCurrentL1() {
+    seWritePreciseCurrent(SE_PRECISE_I1_FLOAT_REG, SE_PRECISE_I1_U16_REG, s_sinsts1_va, s_urms1_v);
+    float denom = (s_urms1_v > 0) ? (float)s_urms1_v : 230.0f;
+    sdm630WriteFloat(SDM630_L1_CURRENT, (float)s_sinsts1_va / denom);
+}
+static void seUpdatePreciseCurrentL2() {
+    seWritePreciseCurrent(SE_PRECISE_I2_FLOAT_REG, SE_PRECISE_I2_U16_REG, s_sinsts2_va, s_urms2_v);
+    float denom = (s_urms2_v > 0) ? (float)s_urms2_v : 230.0f;
+    sdm630WriteFloat(SDM630_L2_CURRENT, (float)s_sinsts2_va / denom);
+}
+static void seUpdatePreciseCurrentL3() {
+    seWritePreciseCurrent(SE_PRECISE_I3_FLOAT_REG, SE_PRECISE_I3_U16_REG, s_sinsts3_va, s_urms3_v);
+    float denom = (s_urms3_v > 0) ? (float)s_urms3_v : 230.0f;
+    sdm630WriteFloat(SDM630_L3_CURRENT, (float)s_sinsts3_va / denom);
+}
 
 static void seUpdateCosPhi() {
     if (s_sinsts_va == 0) return;
@@ -102,6 +142,15 @@ static void seUpdateCosPhi() {
     if (cos_phi > 1.0f) cos_phi = 1.0f;
     seWriteFloat32(SE_COSPHI_FLOAT_REG, cos_phi);
     holdingRegisters[SE_COSPHI_U16_REG] = (uint16_t)(cos_phi * 1000.0f + 0.5f);
+    // SDM630: power factors and per-phase / total active power
+    sdm630WriteFloat(SDM630_L1_POWER_FACTOR,    cos_phi);
+    sdm630WriteFloat(SDM630_L2_POWER_FACTOR,    cos_phi);
+    sdm630WriteFloat(SDM630_L3_POWER_FACTOR,    cos_phi);
+    sdm630WriteFloat(SDM630_TOTAL_POWER_FACTOR, cos_phi);
+    sdm630WriteFloat(SDM630_TOTAL_ACTIVE_POWER, P);
+    sdm630WriteFloat(SDM630_L1_ACTIVE_POWER, (float)s_sinsts1_va * cos_phi);
+    sdm630WriteFloat(SDM630_L2_ACTIVE_POWER, (float)s_sinsts2_va * cos_phi);
+    sdm630WriteFloat(SDM630_L3_ACTIVE_POWER, (float)s_sinsts3_va * cos_phi);
 }
 
 // dt guard (500 ms) rejects anomalously fast back-to-back frames.
@@ -281,39 +330,46 @@ static void dispatchSfx(TicSfx sfx, uint64_t v) {
             s_urms1_v = v16;
             seUpdatePreciseCurrent();
             seUpdatePreciseCurrentL1();
+            sdm630WriteFloat(SDM630_L1_VOLTAGE, (float)v16);
             break;
         case SFX_URMS2:
             seWriteInt32(SE_URMS2_REG, (int32_t)v16 * 10);
             s_urms2_v = v16;
             s_urms2_set = true;
             seUpdatePreciseCurrentL2();
+            sdm630WriteFloat(SDM630_L2_VOLTAGE, (float)v16);
             break;
         case SFX_URMS3:
             seWriteInt32(SE_URMS3_REG, (int32_t)v16 * 10);
             s_urms3_v = v16;
             s_urms3_set = true;
             seUpdatePreciseCurrentL3();
+            sdm630WriteFloat(SDM630_L3_VOLTAGE, (float)v16);
             break;
         case SFX_SINSTS:
             seWriteInt32(SE_PAPP_REG, v32);
             s_sinsts_va = v32u;
             seUpdatePreciseCurrent();
             seUpdateCosPhi();
+            sdm630WriteFloat(SDM630_TOTAL_APPARENT_VA, (float)v32u);
             break;
         case SFX_SINSTS1:
             seWriteInt32(SE_PAPP1_REG, v32);
             s_sinsts1_va = v32u;
             seUpdatePreciseCurrentL1();
+            sdm630WriteFloat(SDM630_L1_APPARENT_POWER, (float)v32u);
             break;
         case SFX_SINSTS2:
             seWriteInt32(SE_PAPP2_REG, v32);
             s_sinsts2_va = v32u;
             seUpdatePreciseCurrentL2();
+            sdm630WriteFloat(SDM630_L2_APPARENT_POWER, (float)v32u);
             break;
         case SFX_SINSTS3:
             seWriteInt32(SE_PAPP3_REG, v32);
             s_sinsts3_va = v32u;
             seUpdatePreciseCurrentL3();
+            sdm630WriteFloat(SDM630_L3_APPARENT_POWER, (float)v32u);
             break;
         case SFX_CCASN:
             s_ccasn_w = v32u;
