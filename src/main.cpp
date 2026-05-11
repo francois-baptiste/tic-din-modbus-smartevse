@@ -38,6 +38,17 @@ uint8_t u8ErrorDecode  = 0;
 
 bool bDoTreatment = false;
 
+// Temporary WiFi window variables
+unsigned long wifiWindowEndMillis = 0;
+bool isTemporaryWifi = false;
+
+unsigned long getTemporaryWifiRemainingSeconds() {
+    if (!isTemporaryWifi) return 0;
+    unsigned long currentMillis = millis();
+    if (currentMillis > wifiWindowEndMillis) return 0;
+    return (wifiWindowEndMillis - currentMillis) / 1000;
+}
+
 bool stx;
 bool etx;
 bool lf;
@@ -294,15 +305,19 @@ void setup() {
         Serial.println(F("AP"));
     } else {
         if (ConfigSettings.enableWiFi) {
-            Serial.println(F("configOK"));
+            Serial.println(F("configOK - WiFi Enabled"));
             holdingRegisters[666] = 1;
-            Serial.println(F("AP"));
             setupWifiAP();
             modeWiFi = "AP";
         } else {
-            holdingRegisters[666] = 0;
-            WiFi.softAPdisconnect();
-            esp_wifi_stop();
+            Serial.println(F("configOK - WiFi Disabled (Starting Temp Window)"));
+            // Start temporary WiFi window of 2 minutes (120000 ms)
+            isTemporaryWifi = true;
+            wifiWindowEndMillis = millis() + 120000;
+            holdingRegisters[666] = 1; // Temporarily show as enabled
+            oldWiFiState = 1;
+            setupWifiAP();
+            modeWiFi = "AP";
         }
     }
 
@@ -319,7 +334,7 @@ void setup() {
     modbus.begin(ConfigSettings.modbus_id, atoi(ConfigSettings.modbus_bauds), modbusSerialConfig);
 
     loadConfigHTTP();
-    if (ConfigSettings.enableWiFi) initWebServer();
+    if (ConfigSettings.enableWiFi || isTemporaryWifi) initWebServer();
 }
 
 // ── Loop ──────────────────────────────────────────────────────────────────────
@@ -330,9 +345,19 @@ bool disableWiFi = false;
 void loop() {
     modbus.poll();
 
+    // Check temporary WiFi window timeout
+    if (isTemporaryWifi && millis() > wifiWindowEndMillis) {
+        isTemporaryWifi = false;
+        holdingRegisters[666] = 0;
+        oldWiFiState = 0;
+        disableWiFi = true;
+        Serial.println("Temporary WiFi window expired. Disabling WiFi.");
+    }
+
     // WiFi enable/disable via holding register 666
     if (holdingRegisters[666] == 1) {
         if (oldWiFiState == 0) {
+            isTemporaryWifi = false;
             oldWiFiState = 1;
             enableWiFi   = true;
             ConfigSettings.enableWiFi = 1;
