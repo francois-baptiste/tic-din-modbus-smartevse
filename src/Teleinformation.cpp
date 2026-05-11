@@ -306,6 +306,39 @@ static void dispatchSfx(TicSfx sfx, uint64_t v) {
 
 // ── Data processor ────────────────────────────────────────────────────────────
 
+CustomRegList* customRegs = nullptr;
+
+void loadCustomRegisters() {
+    const char *path = "/modbus/registres_spec.json";
+    File RegFile = LittleFS.open(path, FILE_READ);
+    if (!RegFile || RegFile.isDirectory()) {
+        log_e("failed open");
+        return;
+    }
+    log_e("open OK");
+    DynamicJsonDocument temp(100000);
+    deserializeJson(temp, RegFile);
+    RegFile.close();
+
+    if (temp.containsKey("standard")) {
+        JsonArray arr = temp["standard"].as<JsonArray>();
+        CustomRegList** curr = &customRegs;
+        for (JsonVariant v : arr) {
+            JsonObject obj = v.as<JsonObject>();
+            const char* cmd = obj["command"] | "";
+            CustomRegList* entry = new CustomRegList();
+            strlcpy(entry->command, cmd, sizeof(entry->command));
+            entry->size = obj["size"] | 0;
+            entry->reg = obj["reg"] | 0;
+            const char* type = obj["type"] | "numeric";
+            entry->is_numeric = (strcmp(type, "numeric") == 0);
+            entry->next = nullptr;
+            *curr = entry;
+            curr = &(entry->next);
+        }
+    }
+}
+
 bool bDataProcessingStandard(char *au8Command, char *au8Value, uint8_t au8Pos) {
     for (size_t n = 0; n < sizeof(s_table) / sizeof(s_table[0]); ++n) {
         const TicEntry &e = s_table[n];
@@ -341,38 +374,21 @@ bool bDataProcessingStandard(char *au8Command, char *au8Value, uint8_t au8Pos) {
         return true;
     }
 
-    // Fallback: user-defined register spec on LittleFS
-    const char *path = "/modbus/registres_spec.json";
-    File RegFile = LittleFS.open(path, FILE_READ);
-    if (!RegFile || RegFile.isDirectory()) {
-        log_e("failed open");
-        return true;
-    }
-    log_e("open OK");
-    DynamicJsonDocument temp(100000);
-    deserializeJson(temp, RegFile);
-    RegFile.close();
-
-    if (temp.containsKey("standard")) {
-        JsonArray arr = temp["standard"].as<JsonArray>();
-        int k = 0;
-        for (JsonVariant v : arr) {
-            (void)v;
-            size_t cmd_len = strlen(temp["standard"][k]["command"].as<String>().c_str());
-            if (memcmp(au8Command, temp["standard"][k]["command"].as<String>().c_str(), cmd_len) == 0) {
-                int size = temp["standard"][k]["size"].as<int>();
-                int reg  = temp["standard"][k]["reg"].as<int>();
-                if (memcmp(temp["standard"][k]["type"].as<String>().c_str(), "numeric", 7) == 0) {
-                    long long tmp = strtoull(au8Value, NULL, 10);
-                    for (int j = 0; j < size; j++)
-                        holdingRegisters[reg + j] = (uint16_t)(tmp >> ((size - 1 - j) * 16)) & 0xFFFF;
-                } else if (memcmp(temp["standard"][k]["type"].as<String>().c_str(), "string", 6) == 0) {
-                    for (int j = 0; j < size; j++)
-                        holdingRegisters[reg + j] = static_cast<uint16_t>(au8Value[j]);
-                }
+    // Fallback: user-defined register spec pre-loaded in memory
+    CustomRegList* curr = customRegs;
+    while (curr != nullptr) {
+        size_t cmd_len = strlen(curr->command);
+        if (memcmp(au8Command, curr->command, cmd_len) == 0) {
+            if (curr->is_numeric) {
+                long long tmp = strtoull(au8Value, NULL, 10);
+                for (int j = 0; j < curr->size; j++)
+                    holdingRegisters[curr->reg + j] = (uint16_t)(tmp >> ((curr->size - 1 - j) * 16)) & 0xFFFF;
+            } else {
+                for (int j = 0; j < curr->size; j++)
+                    holdingRegisters[curr->reg + j] = static_cast<uint16_t>(au8Value[j]);
             }
-            ++k;
         }
+        curr = curr->next;
     }
     return true;
 }

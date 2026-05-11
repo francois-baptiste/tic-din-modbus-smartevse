@@ -305,6 +305,9 @@ void setup() {
         }
     }
 
+    // Load user-defined fallback registers
+    loadCustomRegisters();
+
     // Modbus RTU on Serial1
     Serial1.setPins(10, 7);
     loadConfigModbus();
@@ -367,6 +370,6 @@ void loop() {
         u32Timeout    = 0;
     }
 
-    delay(10);
+    delay(1);
     u32Timeout++;
 }

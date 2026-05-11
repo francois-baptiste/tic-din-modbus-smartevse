@@ -559,6 +559,7 @@ void handleStatusNetwork(AsyncWebServerRequest *request)
 void handleConfigGeneral(AsyncWebServerRequest *request)
 {
   String result;
+  result.reserve(2048);
   result += F("<html>");
   result += FPSTR(HTTP_HEADER);
   result += FPSTR(HTTP_MENU);
@@ -583,6 +584,7 @@ void handleConfigGeneral(AsyncWebServerRequest *request)
 void handleConfigHTTP(AsyncWebServerRequest *request)
 {
   String result;
+  result.reserve(2048);
   result += F("<html>");
   result += FPSTR(HTTP_HEADER);
   result += FPSTR(HTTP_MENU);
@@ -607,6 +609,7 @@ void handleConfigHTTP(AsyncWebServerRequest *request)
 void handleConfigWifi(AsyncWebServerRequest *request)
 {
   String result;
+  result.reserve(2048);
   result += F("<html>");
   result += FPSTR(HTTP_HEADER);
   result += FPSTR(HTTP_MENU);
@@ -640,6 +643,7 @@ void handleConfigWifi(AsyncWebServerRequest *request)
 void handleConfigModbus(AsyncWebServerRequest *request)
 {
   String result;
+  result.reserve(2048);
   result += F("<html>");
   result += FPSTR(HTTP_HEADER);
   result += FPSTR(HTTP_MENU);
@@ -703,6 +707,7 @@ void handleConfigModbus(AsyncWebServerRequest *request)
 void handleConfigFiles(AsyncWebServerRequest *request)
 {
   String result;
+  result.reserve(4096);
   result += F("<html>");
   result += FPSTR(HTTP_HEADER);
   result += FPSTR(HTTP_MENU);
@@ -761,6 +766,7 @@ void handleConfigFiles(AsyncWebServerRequest *request)
 void handleModbusFiles(AsyncWebServerRequest *request)
 {
   String result;
+  result.reserve(4096);
   result += F("<html>");
   result += FPSTR(HTTP_HEADER);
   result += FPSTR(HTTP_MENU);
@@ -836,6 +842,7 @@ void handleTools(AsyncWebServerRequest *request)
 
 void handleHelp(AsyncWebServerRequest * request) {
   String result;
+  result.reserve(2048);
   result += F("<html>");
   result += FPSTR(HTTP_HEADER);
   result += FPSTR(HTTP_MENU);
@@ -989,6 +996,7 @@ void handleToolUpdate(AsyncWebServerRequest *request)
 void handleDebugFiles(AsyncWebServerRequest *request)
 {
   String result;
+  result.reserve(4096);
   result += F("<html>");
   result += FPSTR(HTTP_HEADER);
   result += FPSTR(HTTP_MENU);
