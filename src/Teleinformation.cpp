@@ -2,6 +2,7 @@
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 #include "Teleinformation.h"
+#include "config.h"
 
 // ── Parser state (mutated only inside bTranscodeCharTIC) ─────────────────────
 static unsigned int s_pos      = 0;   // field index: 0=label 1=horodate 2=value 3=checksum
@@ -10,9 +11,10 @@ static uint8_t      s_crc_rx   = 0;   // last received byte when pos≥2 (become
 static uint8_t      s_crc_acc  = 0;   // running sum: label+TAB+horodate+TAB+value+TAB
 static uint8_t      s_crc_snap = 0;   // snapshot of s_crc_acc at the separator after value
 
-extern uint16_t holdingRegisters[24600];
-extern uint32_t u32Timeout;
-extern uint8_t  u8ErrorDecode;
+extern uint16_t             holdingRegisters[24600];
+extern uint32_t             u32Timeout;
+extern uint8_t              u8ErrorDecode;
+extern ConfigSettingsStruct ConfigSettings;
 
 // ── SmartEVSE v3.1 mirror registers (0–19) — INT32 big-endian (high word first)
 // Configure SmartEVSE Custom Meter: FC=3, INT32, endian HBF_HWF(3), IDivisor=3, UDivisor=1, PDivisor=0
@@ -304,6 +306,27 @@ static void dispatchSfx(TicSfx sfx, uint64_t v) {
     }
 }
 
+// ── Spec-file cache ───────────────────────────────────────────────────────────
+// /modbus/registres_spec.json is loaded once on first unknown label and kept in
+// heap. The web UI always reboots after saving the file, so the cache is valid
+// for the lifetime of the process.
+
+static DynamicJsonDocument *s_spec_doc   = nullptr;
+static bool                 s_spec_tried = false;
+
+static void ensureSpecDoc() {
+    if (s_spec_tried) return;
+    s_spec_tried = true;
+    File f = LittleFS.open("/modbus/registres_spec.json", FILE_READ);
+    if (!f || f.isDirectory()) { f.close(); return; }
+    s_spec_doc = new DynamicJsonDocument(100000);
+    if (deserializeJson(*s_spec_doc, f) != DeserializationError::Ok) {
+        delete s_spec_doc;
+        s_spec_doc = nullptr;
+    }
+    f.close();
+}
+
 // ── Data processor ────────────────────────────────────────────────────────────
 
 bool bDataProcessingStandard(char *au8Command, char *au8Value, uint8_t au8Pos) {
@@ -332,7 +355,8 @@ bool bDataProcessingStandard(char *au8Command, char *au8Value, uint8_t au8Pos) {
                 break;
         }
 
-        Serial.printf("%s : %s\r\n", au8Command, au8Value);
+        if (ConfigSettings.enableDebug)
+            Serial.printf("%s : %s\r\n", au8Command, au8Value);
 
         if (e.need_horodate && au8Pos != 3) {
             u8ErrorDecode = 3;
@@ -341,37 +365,26 @@ bool bDataProcessingStandard(char *au8Command, char *au8Value, uint8_t au8Pos) {
         return true;
     }
 
-    // Fallback: user-defined register spec on LittleFS
-    const char *path = "/modbus/registres_spec.json";
-    File RegFile = LittleFS.open(path, FILE_READ);
-    if (!RegFile || RegFile.isDirectory()) {
-        log_e("failed open");
-        return true;
-    }
-    log_e("open OK");
-    DynamicJsonDocument temp(100000);
-    deserializeJson(temp, RegFile);
-    RegFile.close();
+    // Fallback: user-defined register spec (loaded once from /modbus/registres_spec.json)
+    ensureSpecDoc();
+    if (!s_spec_doc) return true;
 
-    if (temp.containsKey("standard")) {
-        JsonArray arr = temp["standard"].as<JsonArray>();
-        int k = 0;
-        for (JsonVariant v : arr) {
-            (void)v;
-            size_t cmd_len = strlen(temp["standard"][k]["command"].as<String>().c_str());
-            if (memcmp(au8Command, temp["standard"][k]["command"].as<String>().c_str(), cmd_len) == 0) {
-                int size = temp["standard"][k]["size"].as<int>();
-                int reg  = temp["standard"][k]["reg"].as<int>();
-                if (memcmp(temp["standard"][k]["type"].as<String>().c_str(), "numeric", 7) == 0) {
-                    long long tmp = strtoull(au8Value, NULL, 10);
-                    for (int j = 0; j < size; j++)
-                        holdingRegisters[reg + j] = (uint16_t)(tmp >> ((size - 1 - j) * 16)) & 0xFFFF;
-                } else if (memcmp(temp["standard"][k]["type"].as<String>().c_str(), "string", 6) == 0) {
-                    for (int j = 0; j < size; j++)
-                        holdingRegisters[reg + j] = static_cast<uint16_t>(au8Value[j]);
-                }
+    if (s_spec_doc->containsKey("standard")) {
+        for (JsonVariant entry : (*s_spec_doc)["standard"].as<JsonArray>()) {
+            const char *cmd = entry["command"].as<const char *>();
+            if (!cmd || strcmp(au8Command, cmd) != 0) continue;
+            int         size = entry["size"].as<int>();
+            int         reg  = entry["reg"].as<int>();
+            const char *type = entry["type"].as<const char *>();
+            if (type && memcmp(type, "numeric", 7) == 0) {
+                long long tmp = strtoull(au8Value, NULL, 10);
+                for (int j = 0; j < size; j++)
+                    holdingRegisters[reg + j] = (uint16_t)(tmp >> ((size - 1 - j) * 16)) & 0xFFFF;
+            } else if (type && memcmp(type, "string", 6) == 0) {
+                for (int j = 0; j < size; j++)
+                    holdingRegisters[reg + j] = static_cast<uint16_t>(au8Value[j]);
             }
-            ++k;
+            break;
         }
     }
     return true;

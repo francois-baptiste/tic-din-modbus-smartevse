@@ -352,21 +352,9 @@ float temperatureReadFixed()
 
 String getMenuGeneral(String tmp, String selected)
 {
-  
   tmp.replace("{{menu_config}}", FPSTR(HTTP_CONFIG_MENU));
-  if (selected=="general")
-  {
-    tmp.replace("{{menu_config_general}}", "disabled");
-  }else if (selected=="http")
-  {
-    tmp.replace("{{menu_config_http}}", "disabled");
-  }else if (selected=="modbus")
-  {
-    tmp.replace("{{menu_config_modbus}}", "disabled");
-  }else
-  {
-    tmp.replace("{{menu_config_general}}", "");
-  }
+  tmp.replace("{{menu_config_modbus}}", selected == "modbus" ? F("disabled") : F(""));
+  tmp.replace("{{menu_config_http}}",   selected == "http"   ? F("disabled") : F(""));
   return tmp;
 }
 
@@ -1136,10 +1124,7 @@ void handleReadfile(AsyncWebServerRequest *request)
     return;
   }
 
-  while (file.available())
-  {
-    result += (char)file.read();
-  }
+  result = file.readString();
   file.close();
   request->send(200, F("text/html"), result);
 }
@@ -1172,31 +1157,18 @@ void handleScanNetwork(AsyncWebServerRequest * request)
 
 void handleSaveConfigHTTP(AsyncWebServerRequest *request)
 {
-
-  String path = "configHTTP.json";
-  String enableHTTP;
-  if (request->arg("enableSecureHttp") == "on")
-  {
-    enableHTTP = "1";
-    ConfigSettings.enableSecureHttp = true;
-  }
-  else
-  {
-    enableHTTP = "0";
-    ConfigSettings.enableSecureHttp = false;
-  }
-  config_write(path, "enableSecureHttp", enableHTTP);
-  if (request->arg("userHTTP"))
-  {
+  ConfigSettings.enableSecureHttp = (request->arg("enableSecureHttp") == "on");
+  if (request->hasArg("userHTTP"))
     strlcpy(ConfigSettings.userHTTP, request->arg("userHTTP").c_str(), sizeof(ConfigSettings.userHTTP));
-    config_write(path, "userHTTP", String(request->arg("userHTTP")));
-  }
-
-  if (request->arg("passHTTP"))
-  {
+  if (request->hasArg("passHTTP"))
     strlcpy(ConfigSettings.passHTTP, request->arg("passHTTP").c_str(), sizeof(ConfigSettings.passHTTP));
-    config_write(path, "passHTTP", String(request->arg("passHTTP")));
-  }
+
+  DynamicJsonDocument doc(512);
+  doc["enableSecureHttp"] = ConfigSettings.enableSecureHttp ? 1 : 0;
+  doc["userHTTP"]         = ConfigSettings.userHTTP;
+  doc["passHTTP"]         = ConfigSettings.passHTTP;
+  File f = LittleFS.open("/config/configHTTP.json", "w+");
+  if (f && !f.isDirectory()) { serializeJson(doc, f); f.close(); }
 
   AsyncWebServerResponse *response = request->beginResponse(303);
   response->addHeader(F("Location"), F("/reboot"));
@@ -1205,26 +1177,19 @@ void handleSaveConfigHTTP(AsyncWebServerRequest *request)
 
 void handleSaveConfigModbus(AsyncWebServerRequest *request)
 {
-
-  String path = "configModbus.json";
-  
   if (atoi(request->arg("modbus_id").c_str()) > 0)
-  {
     ConfigSettings.modbus_id = atoi(request->arg("modbus_id").c_str());
-    config_write(path, "modbus_id", String(request->arg("modbus_id")));
-  }
-
-  if (request->arg("modbus_bauds"))
-  {
+  if (request->hasArg("modbus_bauds"))
     strlcpy(ConfigSettings.modbus_bauds, request->arg("modbus_bauds").c_str(), sizeof(ConfigSettings.modbus_bauds));
-    config_write(path, "modbus_bauds", String(request->arg("modbus_bauds")));
-  }
-
-  if (request->arg("modbus_parity"))
-  {
+  if (request->hasArg("modbus_parity"))
     strlcpy(ConfigSettings.modbus_parity, request->arg("modbus_parity").c_str(), sizeof(ConfigSettings.modbus_parity));
-    config_write(path, "modbus_parity", String(request->arg("modbus_parity")));
-  }
+
+  DynamicJsonDocument doc(256);
+  doc["modbus_id"]     = ConfigSettings.modbus_id;
+  doc["modbus_bauds"]  = ConfigSettings.modbus_bauds;
+  doc["modbus_parity"] = ConfigSettings.modbus_parity;
+  File f = LittleFS.open("/config/configModbus.json", "w+");
+  if (f && !f.isDirectory()) { serializeJson(doc, f); f.close(); }
 
   AsyncWebServerResponse *response = request->beginResponse(303);
   response->addHeader(F("Location"), F("/reboot"));
@@ -1273,63 +1238,43 @@ void handleSaveConfig(AsyncWebServerRequest *request)
 }
 void handleSaveWifi(AsyncWebServerRequest *request)
 {
+  bool wifiOn = (request->arg("wifiEnable") == "on");
+  ConfigSettings.enableWiFi = wifiOn;
+  holdingRegisters[666] = wifiOn ? 1 : 0;
 
-  String path = "configWifi.json";
-  String enableWiFi;
-  bool saveOk=false;
-  if (request->arg("wifiEnable") == "on")
-  {
-    enableWiFi = "1";
-    ConfigSettings.enableWiFi = true;
-    holdingRegisters[666]=1;
-    config_write(path, "enableWiFi", enableWiFi);
-  }else
-  {
-    enableWiFi = "0";
-    ConfigSettings.enableWiFi = false;
-    holdingRegisters[666]=0;
-    config_write(path, "enableWiFi", enableWiFi);
+  auto writeWifiConfig = [&]() {
+    DynamicJsonDocument doc(512);
+    doc["enableWiFi"] = wifiOn ? 1 : 0;
+    doc["ssid"]       = ConfigSettings.ssid;
+    doc["pass"]       = ConfigSettings.password;
+    File f = LittleFS.open("/config/configWifi.json", "w+");
+    if (f && !f.isDirectory()) { serializeJson(doc, f); f.close(); }
+  };
 
+  if (!wifiOn) {
+    writeWifiConfig();
     AsyncWebServerResponse *response = request->beginResponse(303);
     response->addHeader(F("Location"), F("/"));
     request->send(response);
-    
-  }
-  
-  if (ConfigSettings.enableWiFi)
-  {
-    if (request->arg("WIFISSID"))
-    {
-      saveOk=true;
-    }
-
-    if (request->arg("WIFIpassword"))
-    {    
-      if (strlen(request->arg("WIFIpassword").c_str())>7)
-      {
-        saveOk=saveOk & true;    
-      }else{
-        saveOk=saveOk & false;  
-      }   
-    }
-
-    if (saveOk)
-    {
-      strlcpy(ConfigSettings.ssid, request->arg("WIFISSID").c_str(), sizeof(ConfigSettings.ssid));
-      config_write(path, "ssid", String(request->arg("WIFISSID")));
-      strlcpy(ConfigSettings.password, request->arg("WIFIpassword").c_str(), sizeof(ConfigSettings.password));
-      config_write(path, "pass", String(request->arg("WIFIpassword")));
-      AsyncWebServerResponse *response = request->beginResponse(303);
-      response->addHeader(F("Location"), F("/"));
-      request->send(response);
-    }else{
-      AsyncWebServerResponse *response = request->beginResponse(303);
-      response->addHeader(F("Location"), F("/configWiFi?error=1"));
-      request->send(response);
-    }
+    return;
   }
 
-  
+  bool saveOk = !request->arg("WIFISSID").isEmpty();
+  if (!request->arg("WIFIpassword").isEmpty())
+    saveOk = saveOk && (request->arg("WIFIpassword").length() > 7);
+
+  if (saveOk) {
+    strlcpy(ConfigSettings.ssid,     request->arg("WIFISSID").c_str(),     sizeof(ConfigSettings.ssid));
+    strlcpy(ConfigSettings.password, request->arg("WIFIpassword").c_str(), sizeof(ConfigSettings.password));
+    writeWifiConfig();
+    AsyncWebServerResponse *response = request->beginResponse(303);
+    response->addHeader(F("Location"), F("/"));
+    request->send(response);
+  } else {
+    AsyncWebServerResponse *response = request->beginResponse(303);
+    response->addHeader(F("Location"), F("/configWiFi?error=1"));
+    request->send(response);
+  }
 }
 
 
