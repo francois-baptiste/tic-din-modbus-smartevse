@@ -309,8 +309,14 @@ static void checkResetButton() {
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
 
+// Candidate GPIO pins that could be the physical buttons (excludes 3=LED, 7=TX, 10=RX, 11-17=flash, 20-21=UART0)
+static const uint8_t BUTTON_CANDIDATES[] = {0, 1, 2, 4, 5, 6, 8, 9};
+
 void setup() {
     initLed();
+
+    // Set candidate button pins as INPUT_PULLUP so they read cleanly
+    for (uint8_t p : BUTTON_CANDIDATES) pinMode(p, INPUT_PULLUP);
 
     // TIC standard mode: 9600 baud, 7 data bits, even parity, 1 stop bit
     Serial.end();

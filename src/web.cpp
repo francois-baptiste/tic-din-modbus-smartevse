@@ -24,6 +24,9 @@ extern struct ConfigSettingsStruct ConfigSettings;
 extern uint16_t holdingRegisters[24600];
 extern uint16_t sdm630InputRegisters[60];
 
+// GPIO pins monitored for button diagnostics (excludes 3=LED, 7=TX, 10=RX, 11-17=flash, 20-21=UART0)
+static const uint8_t BTN_CAND[] = {0, 1, 2, 4, 5, 6, 8, 9};
+
 HTTPClient clientWeb;
 
 AsyncWebServer serverWeb(80);
@@ -61,7 +64,7 @@ const char HTTP_HELP[] PROGMEM =
     "<h3>Lockout recovery &mdash; WiFi credential reset</h3>"
     "If you can no longer connect (wrong SSID or password and the 2-minute window is not enough), use the hardware reset:"
     "<ol>"
-    "<li>Power on the device while <strong>holding the BOOT button</strong> (GPIO&nbsp;9 &mdash; the button next to the USB connector).</li>"
+    "<li>Power on the device while <strong>holding the BOOT button</strong> (GPIO&nbsp;9).</li>"
     "<li>Keep holding. The LED blinks rapidly as a <strong>5-second countdown</strong>.</li>"
     "<li>After the 10 rapid confirmation flashes, release the button.</li>"
     "</ol>"
@@ -461,6 +464,31 @@ void handleStatusNetwork(AsyncWebServerRequest *request)
   response->print(F("<div class='row' style='--bs-gutter-x: 0.3rem;'><div class='row' style='--bs-gutter-x: 0.3rem;'><div class='col-sm-3'><div class='card'><div class='card-header'>System Infos</div><div class='card-body'><i>System :</i><br>"));
   response->printf("<strong>Device temperature :</strong> %.1f &deg;C<br>", (double)temperatureReadFixed());
   response->print(F("</div></div></div></div>"));
+
+  // Button diagnostics card
+  response->print(F("<div class='row' style='--bs-gutter-x: 0.3rem;'><div class='col-sm-3'><div class='card'><div class='card-header'>Button Diagnostics</div><div class='card-body'>"));
+  response->print(F("<p class='text-muted small mb-2'>Press each physical button and watch which GPIO turns red.</p>"));
+  for (uint8_t i = 0; i < sizeof(BTN_CAND); i++) {
+    response->printf(
+      "<div class='d-flex justify-content-between align-items-center mb-1'>"
+      "<span>GPIO&nbsp;%d</span>"
+      "<span id='btn_%d' style='display:inline-block;min-width:80px;text-align:center;"
+      "padding:1px 6px;border-radius:4px;background:#198754;color:white;font-size:0.82em;'>released</span>"
+      "</div>",
+      BTN_CAND[i], BTN_CAND[i]);
+  }
+  response->print(F(
+    "<script>"
+    "function updBtns(){"
+    "fetch('/api/buttons').then(r=>r.json()).then(d=>{"
+    "Object.entries(d).forEach(function(e){"
+    "var el=document.getElementById('btn_'+e[0]);"
+    "if(el){el.style.background=e[1]===0?'#dc3545':'#198754';"
+    "el.innerText=e[1]===0?'PRESSED':'released';}"
+    "});}).catch(function(){});}"
+    "setInterval(updBtns,300);updBtns();"
+    "</script>"
+    "</div></div></div></div>"));
 
   // Modbus mapping table — streamed row by row, no large String accumulation
   response->print(F("<h1>ModBus Infos</h1><div class='col-sm-3'><div class='card'><div class='card-header'>Mapping table</div><div class='card-body'>"));
@@ -1458,6 +1486,16 @@ void handleSaveWifiCreds(AsyncWebServerRequest *request)
   request->send(200, "text/html", "Save config OK ! <br><form method='GET' action='reboot'><input type='submit' name='reboot' value='Reboot'></form>");
 }*/
 
+void handleButtonTest(AsyncWebServerRequest *request) {
+  String json = "{";
+  for (uint8_t i = 0; i < sizeof(BTN_CAND); i++) {
+    if (i > 0) json += ",";
+    json += "\"" + String(BTN_CAND[i]) + "\":" + String(digitalRead(BTN_CAND[i]));
+  }
+  json += "}";
+  request->send(200, F("application/json"), json);
+}
+
 void closeWebserver()
 {
   serverWeb.end();
@@ -1701,13 +1739,18 @@ void initWebServer()
     handleModbusFiles(request); 
   });
   serverWeb.on("/help", HTTP_GET, [](AsyncWebServerRequest *request)
-  { 
+  {
     if (ConfigSettings.enableSecureHttp)
     {
       if(!request->authenticate(ConfigSettings.userHTTP, ConfigSettings.passHTTP) )
         return request->requestAuthentication();
     }
-    handleHelp(request); 
+    handleHelp(request);
+  });
+
+  serverWeb.on("/api/buttons", HTTP_GET, [](AsyncWebServerRequest *request)
+  {
+    handleButtonTest(request);
   });
 
 
