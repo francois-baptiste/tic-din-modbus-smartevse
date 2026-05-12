@@ -119,9 +119,12 @@ static void seUpdatePreciseCurrent() {
     seWritePreciseCurrent(SE_PRECISE_I_FLOAT_REG, SE_PRECISE_I_U16_REG, s_sinsts_va, v);
 }
 static void seUpdatePreciseCurrentL1() {
-    seWritePreciseCurrent(SE_PRECISE_I1_FLOAT_REG, SE_PRECISE_I1_U16_REG, s_sinsts1_va, s_urms1_v);
+    // Single-phase fallback: SINSTS1 absent on monophasé meters — use total SINSTS
+    uint32_t sinsts = (s_sinsts1_va > 0 || s_urms2_set || s_urms3_set)
+                      ? s_sinsts1_va : s_sinsts_va;
+    seWritePreciseCurrent(SE_PRECISE_I1_FLOAT_REG, SE_PRECISE_I1_U16_REG, sinsts, s_urms1_v);
     float denom = (s_urms1_v > 0) ? (float)s_urms1_v : 230.0f;
-    sdm630WriteFloat(SDM630_L1_CURRENT, (float)s_sinsts1_va / denom);
+    sdm630WriteFloat(SDM630_L1_CURRENT, (float)sinsts / denom);
 }
 static void seUpdatePreciseCurrentL2() {
     seWritePreciseCurrent(SE_PRECISE_I2_FLOAT_REG, SE_PRECISE_I2_U16_REG, s_sinsts2_va, s_urms2_v);
@@ -350,6 +353,7 @@ static void dispatchSfx(TicSfx sfx, uint64_t v) {
             seWriteInt32(SE_PAPP_REG, v32);
             s_sinsts_va = v32u;
             seUpdatePreciseCurrent();
+            seUpdatePreciseCurrentL1();  // refresh SDM630 L1 current (single-phase fallback)
             seUpdateCosPhi();
             sdm630WriteFloat(SDM630_TOTAL_APPARENT_VA, (float)v32u);
             break;
