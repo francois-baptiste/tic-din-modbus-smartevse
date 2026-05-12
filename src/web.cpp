@@ -17,6 +17,7 @@
 #include <Update.h>
 
 #include "config.h"
+#include "web.h"
 #include "microtar.h"
 
 extern struct ConfigSettingsStruct ConfigSettings;
@@ -401,6 +402,20 @@ void handleStatusNetwork(AsyncWebServerRequest *request)
   response->print(F("<strong>Enable : </strong>"));
   response->print(ConfigSettings.enableWiFi ? F("<img src='/web/img/ok.png'>") : F("<img src='/web/img/nok.png'>"));
   response->printf("<br><strong>SSID : </strong>%s", ConfigSettings.ssid);
+  unsigned long tempRem = getTemporaryWifiRemainingSeconds();
+  if (tempRem > 0) {
+    response->printf("<br><span style='color:red;'><strong>Temporary Window:</strong> <span id='tempCountdown'>%lu</span>s remaining</span>", tempRem);
+    response->print("<script>");
+    response->print("setInterval(function() {");
+    response->print("  var el = document.getElementById('tempCountdown');");
+    response->print("  if (el) {");
+    response->print("    var val = parseInt(el.innerText);");
+    response->print("    if (val > 0) el.innerText = val - 1;");
+    response->print("    if (val <= 1) location.reload();");
+    response->print("  }");
+    response->print("}, 1000);");
+    response->print("</script>");
+  }
   response->print(F("</div></div></div></div></div>"));
 
   // Modbus card
@@ -1269,6 +1284,9 @@ void handleSaveConfig(AsyncWebServerRequest *request)
 void handleSaveWifi(AsyncWebServerRequest *request)
 {
   bool wifiOn = (request->arg("wifiEnable") == "on");
+  if (wifiOn && isTemporaryWifi) {
+      isTemporaryWifi = false;
+  }
   ConfigSettings.enableWiFi = wifiOn;
   holdingRegisters[666] = wifiOn ? 1 : 0;
 
