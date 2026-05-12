@@ -383,9 +383,12 @@ void loop() {
 
     if (disableWiFi) {
         disableWiFi = false;
-        closeWebserver();
-        WiFi.softAPdisconnect();
-        esp_wifi_stop();
+        // WiFi shutdown intentionally skipped in v1.18 — testing temporary window
+        // logic before enabling the real cutoff. Re-enable the three lines below
+        // once the countdown and re-enable flow have been validated on the device:
+        // closeWebserver();
+        // WiFi.softAPdisconnect();
+        // esp_wifi_stop();
     }
 
     // Reset error state after prolonged silence (no STX in >1000 loop ticks)
