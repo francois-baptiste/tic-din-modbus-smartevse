@@ -20,7 +20,7 @@ This fork adds native SmartEVSE v3.1 compatibility via **two parallel Modbus reg
 | SDM630 register | Content | Source |
 |-----------------|---------|--------|
 | 0 / 2 / 4 | Voltage L1/L2/L3 (V) | URMS1/2/3 |
-| 6 / 8 / 10 | Current L1/L2/L3 (A) | SINSTS_n ÷ URMS_n |
+| 6 / 8 / 10 | Current L1/L2/L3 (A) | SINSTS_n ÷ URMS_n *(monophasé: SINSTS ÷ URMS1 on L1, 0 on L2/L3)* |
 | 12 / 14 / 16 | Active power L1/L2/L3 (W) | SINSTS_n × cos φ |
 | 18 / 20 / 22 | Apparent power L1/L2/L3 (VA) | SINSTS1/2/3 |
 | 30 / 32 / 34 | Power factor L1/L2/L3 | global cos φ |
@@ -289,7 +289,7 @@ In the SmartEVSE menu (`CONFIG → Meter → Mains`), select **Eastron SDM630**:
 | Address | Content | Unit | Source |
 |---------|---------|------|--------|
 | 0 / 2 / 4 | Voltage L1/L2/L3 | V | URMS1/2/3 |
-| 6 / 8 / 10 | Current L1/L2/L3 | A | SINSTS_n ÷ URMS_n |
+| 6 / 8 / 10 | Current L1/L2/L3 | A | SINSTS_n ÷ URMS_n *(monophasé: SINSTS ÷ URMS1 on L1)* |
 | 12 / 14 / 16 | Active power L1/L2/L3 | W | SINSTS_n × cos φ |
 | 18 / 20 / 22 | Apparent power L1/L2/L3 | VA | SINSTS1/2/3 |
 | 30 / 32 / 34 | Power factor L1/L2/L3 | — | global cos φ |
@@ -346,8 +346,8 @@ Registers 32–34: power factor / cos φ (FLOAT32 + UINT16×1000).
 | 18–19 | Apparent power L3 | INT32 | VA | SINSTS3 |
 | 20–21 | Total precise current *(Option A)* | FLOAT32 | A | SINSTS ÷ URMS1 |
 | 22 | Total precise current *(Option B)* | UINT16 | cA (×100) | SINSTS ÷ URMS1 |
-| 23–24 | L1 precise current *(Option A)* | FLOAT32 | A | SINSTS1 ÷ URMS1 |
-| 25 | L1 precise current *(Option B)* | UINT16 | cA (×100) | SINSTS1 ÷ URMS1 |
+| 23–24 | L1 precise current *(Option A)* | FLOAT32 | A | SINSTS1 ÷ URMS1 *(monophasé: SINSTS ÷ URMS1)* |
+| 25 | L1 precise current *(Option B)* | UINT16 | cA (×100) | SINSTS1 ÷ URMS1 *(monophasé: SINSTS ÷ URMS1)* |
 | 26–27 | L2 precise current *(Option A)* | FLOAT32 | A | SINSTS2 ÷ URMS2 |
 | 28 | L2 precise current *(Option B)* | UINT16 | cA (×100) | SINSTS2 ÷ URMS2 |
 | 29–30 | L3 precise current *(Option A)* | FLOAT32 | A | SINSTS3 ÷ URMS3 |
@@ -378,6 +378,16 @@ modpoll -m rtu -a 11 -r 1 -c 35 -t 4 /dev/ttyUSB0
 ---
 
 ## Changelog
+
+### Version v1.17-smartevse
+* Fix SDM630 Current L1/L2/L3 = 0 on single-phase (monophasé) Linky meters
+  * On monophasé meters the TIC frame emits only `SINSTS` (total apparent power) — `SINSTS1` is never transmitted. The SDM630 L1 current register (FC=04, regs 6-7) was derived from `SINSTS1 ÷ URMS1` and was always 0, causing SmartEVSE (Eastron3P mode) to read 0 A on all phases
+  * Fix: `seUpdatePreciseCurrentL1()` now falls back to `SINSTS ÷ URMS1` when the meter is single-phase (no URMS2/URMS3 received and no SINSTS1). Three-phase meters are unaffected
+  * Fix: `seUpdatePreciseCurrentL1()` is now also called on every `SINSTS` update so the SDM630 current register refreshes immediately when load changes
+  * Same fallback applied to the FC=03 L1 precise-current registers (23–25)
+
+### Version v1.16-smartevse
+* Merge upstream v1.4: updated esp32-c3 partition table
 
 ### Version v1.15-smartevse
 * Add Eastron SDM630 emulation via FC=04 input registers (60 words)
