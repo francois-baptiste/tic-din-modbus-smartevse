@@ -379,6 +379,16 @@ modpoll -m rtu -a 11 -r 1 -c 35 -t 4 /dev/ttyUSB0
 
 ## Changelog
 
+### Version v1.19-smartevse
+* Enable the real WiFi cutoff — temporary window now fully active
+  * WiFi is genuinely disabled when the 2-minute boot window expires or when register 666 is set to 0
+  * v1.18 shipped with the cutoff disabled for safe validation; all flows confirmed working
+* Improve WiFi settings page — split into two independent cards
+  * **WiFi State** card: enable/disable toggle with its own Save button; never touches credentials
+  * **WiFi Credentials** card: SSID + password fields with their own Save button; never toggles the AP state; leave password blank to keep current
+  * Each card shows inline feedback (green confirmation or red error) after saving
+* Update Help page with sections on the WiFi settings split and the temporary power-on window behaviour
+
 ### Version v1.18-smartevse
 * Add temporary power-on WiFi window to prevent lockout when WiFi is disabled
   * When WiFi is disabled (via Modbus register 666 or settings), the device still starts the Access Point and Web Server for **2 minutes** on every boot

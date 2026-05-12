@@ -42,9 +42,22 @@ const char HTTP_HELP[] PROGMEM =
     "<li>High-precision sub-ampere current estimate (SINSTS &divide; URMS)</li>"
     "<li>Power factor / cos &phi; from energy-index derivative &divide; SINSTS</li>"
     "<li>All standard TIC registers visible in the status page</li>"
+    "<li><strong>Temporary power-on WiFi window</strong> &mdash; the AP always starts for 2&nbsp;minutes on boot (see below)</li>"
     "</ul>"
     "<h3>SmartEVSE configuration (recommended)</h3>"
     "Set meter type to <strong>Eastron SDM630</strong>, Modbus address = slave ID shown in Config &rarr; General."
+    "<h3>WiFi settings</h3>"
+    "The WiFi page (<strong>Config &rarr; WiFi</strong>) is split into two independent sections:"
+    "<ul>"
+    "<li><strong>WiFi State</strong> &mdash; enable or disable the Access Point. Saving here does not touch your SSID or password.</li>"
+    "<li><strong>WiFi Credentials</strong> &mdash; change the SSID and/or password. Leave the password field blank to keep the current one. Saving here does not toggle the AP state.</li>"
+    "</ul>"
+    "<h3>Temporary power-on WiFi window</h3>"
+    "Even when the Access Point is <em>disabled</em>, the device starts it automatically for <strong>2&nbsp;minutes</strong> on every boot."
+    " This prevents permanent lockout: if you disable WiFi and have no Modbus master available to re-enable it, simply reboot the device"
+    " and connect within the 2-minute window."
+    "<br>A live countdown is shown on the Network status page while the window is active."
+    " If you enable WiFi during the window, the temporary state is cleared and the AP stays on permanently."
     "<h3>Shop &amp; hardware</h3>"
     "<a href=\"https://lixee.fr/\" target='_blank'>lixee.fr</a><br><br>"
     "<h3>Fork source &amp; issues</h3>"
@@ -273,36 +286,46 @@ const char HTTP_NETWORK[] PROGMEM =
 
 const char HTTP_CONFIG_WIFI[] PROGMEM =
     "<h1>Config WiFi</h1>"
-    "<div class='row justify-content-md-center' >"
-    "<div class='col-sm-6'><form method='POST' action='saveWifi'>"
-    "<div class='form-check'>"
+    "<div class='row justify-content-md-center'>"
+    "<div class='col-sm-6'>"
+
+    // Card 1 — WiFi on/off
+    "<div class='card mb-4'>"
+    "<div class='card-header'><strong>WiFi State</strong></div>"
+    "<div class='card-body'>"
+    "<p class='text-muted small'>Controls whether the Access Point is active. "
+    "Even when disabled, the AP starts for 2&nbsp;minutes on every boot so you can always reach the UI.</p>"
+    "<form method='POST' action='saveWifiState'>"
+    "<div class='form-check mb-3'>"
     "<input class='form-check-input' id='wifiEnable' type='checkbox' name='wifiEnable' {{checkedWiFi}}>"
-    "<label class='form-check-label' for='wifiEnable'>Enable</label>"
+    "<label class='form-check-label' for='wifiEnable'>Enable WiFi Access Point</label>"
     "</div>"
-    "<div class='form-group'>"
+    "<button type='submit' class='btn btn-primary'>Save WiFi State</button>"
+    "<div class='mt-2' style='color:green'>{{savedState}}</div>"
+    "</form>"
+    "</div></div>"
+
+    // Card 2 — SSID / password
+    "<div class='card mb-4'>"
+    "<div class='card-header'><strong>WiFi Credentials</strong></div>"
+    "<div class='card-body'>"
+    "<p class='text-muted small'>Leave the password field blank to keep the current password.</p>"
+    "<form method='POST' action='saveWifiCreds'>"
+    "<div class='form-group mb-2'>"
     "<label for='ssid'>SSID</label>"
-    "<input class='form-control' id='ssid' type='text' name='WIFISSID' value='{{ssid}}'> "
-    //"<a onclick='scanNetwork();' class='btn btn-primary mb-2'>Scan</a><div id='networks'></div>"
+    "<input class='form-control' id='ssid' type='text' name='WIFISSID' value='{{ssid}}'>"
     "</div>"
-    "<div class='form-group'>"
+    "<div class='form-group mb-3'>"
     "<label for='pass'>Password</label>"
     "<input class='form-control' id='pass' type='password' name='WIFIpassword' value=''>"
     "</div>"
-    //"<div class='form-group'>"
-    //"<label for='ip'>@IP</label>"
-    //"<input class='form-control' id='ip' type='text' name='ipAddress' value='{{ip}}'>"
-    //"</div>"
-    //"<div class='form-group'>"
-    //"<label for='mask'>@Mask</label>"
-    //"<input class='form-control' id='mask' type='text' name='ipMask' value='{{mask}}'>"
-    //"</div>"
-    //"<div class='form-group'>"
-    //"<label for='gateway'>@Gateway</label>"
-    //"<input type='text' class='form-control' id='gateway' name='ipGW' value='{{gw}}'>"
-    //"</div>"
-    "<button type='submit' class='btn btn-primary mb-2'name='save'>Save</button>"
-    "<div style='color:red'>{{error}}</div>"
-    "</form>";
+    "<button type='submit' class='btn btn-primary'>Save Credentials</button>"
+    "<div class='mt-2' style='color:red'>{{errorCreds}}</div>"
+    "<div class='mt-2' style='color:green'>{{savedCreds}}</div>"
+    "</form>"
+    "</div></div>"
+
+    "</div></div>";
 
 const char HTTP_CONFIG_MODBUS[] PROGMEM =
     "<h1>Config MODBUS</h1>"
@@ -647,21 +670,22 @@ void handleConfigWifi(AsyncWebServerRequest *request)
   result += FPSTR(HTTP_FOOTER);
   result += F("</html>");
 
-  if (request->arg("error") == "1")
-  {
-    result.replace("{{error}}", "Error : please verify your password > 8 characters");
-  }else{
-    result.replace("{{error}}", "");
+  // WiFi state card feedback
+  result.replace("{{savedState}}", request->arg("saved") == "state" ? "WiFi state saved." : "");
+
+  // Credentials card feedback
+  if (request->arg("error") == "1") {
+    result.replace("{{errorCreds}}", "Error: password must be at least 8 characters.");
+    result.replace("{{savedCreds}}", "");
+  } else if (request->arg("saved") == "creds") {
+    result.replace("{{errorCreds}}", "");
+    result.replace("{{savedCreds}}", "Credentials saved.");
+  } else {
+    result.replace("{{errorCreds}}", "");
+    result.replace("{{savedCreds}}", "");
   }
 
-  if (ConfigSettings.enableWiFi)
-  {
-    result.replace("{{checkedWiFi}}", "Checked");
-  }
-  else
-  {
-    result.replace("{{checkedWiFi}}", "");
-  }
+  result.replace("{{checkedWiFi}}", ConfigSettings.enableWiFi ? "Checked" : "");
   result.replace("{{ssid}}", String(ConfigSettings.ssid));
   //result.replace("{{ip}}", ConfigSettings.ipAddressWiFi);
   //result.replace("{{mask}}", ConfigSettings.ipMaskWiFi);
@@ -1325,6 +1349,56 @@ void handleSaveWifi(AsyncWebServerRequest *request)
   }
 }
 
+// Handles the "WiFi State" card — enable/disable only
+void handleSaveWifiState(AsyncWebServerRequest *request)
+{
+  bool wifiOn = (request->arg("wifiEnable") == "on");
+  if (wifiOn && isTemporaryWifi) isTemporaryWifi = false;
+  ConfigSettings.enableWiFi = wifiOn;
+  holdingRegisters[666] = wifiOn ? 1 : 0;
+
+  DynamicJsonDocument doc(512);
+  doc["enableWiFi"] = wifiOn ? 1 : 0;
+  doc["ssid"]       = ConfigSettings.ssid;
+  doc["pass"]       = ConfigSettings.password;
+  File f = LittleFS.open("/config/configWifi.json", "w+");
+  if (f && !f.isDirectory()) { serializeJson(doc, f); f.close(); }
+
+  AsyncWebServerResponse *response = request->beginResponse(303);
+  response->addHeader(F("Location"), F("/configWiFi?saved=state"));
+  request->send(response);
+}
+
+// Handles the "WiFi Credentials" card — SSID / password only
+void handleSaveWifiCreds(AsyncWebServerRequest *request)
+{
+  bool saveOk = !request->arg("WIFISSID").isEmpty();
+  if (!request->arg("WIFIpassword").isEmpty())
+    saveOk = saveOk && (request->arg("WIFIpassword").length() > 7);
+
+  if (!saveOk) {
+    AsyncWebServerResponse *response = request->beginResponse(303);
+    response->addHeader(F("Location"), F("/configWiFi?error=1"));
+    request->send(response);
+    return;
+  }
+
+  strlcpy(ConfigSettings.ssid,     request->arg("WIFISSID").c_str(),     sizeof(ConfigSettings.ssid));
+  if (!request->arg("WIFIpassword").isEmpty())
+    strlcpy(ConfigSettings.password, request->arg("WIFIpassword").c_str(), sizeof(ConfigSettings.password));
+
+  DynamicJsonDocument doc(512);
+  doc["enableWiFi"] = ConfigSettings.enableWiFi ? 1 : 0;
+  doc["ssid"]       = ConfigSettings.ssid;
+  doc["pass"]       = ConfigSettings.password;
+  File f = LittleFS.open("/config/configWifi.json", "w+");
+  if (f && !f.isDirectory()) { serializeJson(doc, f); f.close(); }
+
+  AsyncWebServerResponse *response = request->beginResponse(303);
+  response->addHeader(F("Location"), F("/configWiFi?saved=creds"));
+  request->send(response);
+}
+
 
 /*void handleSaveWifi(AsyncWebServerRequest *request)
 {
@@ -1501,13 +1575,33 @@ void initWebServer()
   });
   
   serverWeb.on("/saveWifi", HTTP_POST, [](AsyncWebServerRequest *request)
-  { 
+  {
     if (ConfigSettings.enableSecureHttp)
     {
       if(!request->authenticate(ConfigSettings.userHTTP, ConfigSettings.passHTTP) )
         return request->requestAuthentication();
     }
-    handleSaveWifi(request); 
+    handleSaveWifi(request);
+  });
+
+  serverWeb.on("/saveWifiState", HTTP_POST, [](AsyncWebServerRequest *request)
+  {
+    if (ConfigSettings.enableSecureHttp)
+    {
+      if(!request->authenticate(ConfigSettings.userHTTP, ConfigSettings.passHTTP) )
+        return request->requestAuthentication();
+    }
+    handleSaveWifiState(request);
+  });
+
+  serverWeb.on("/saveWifiCreds", HTTP_POST, [](AsyncWebServerRequest *request)
+  {
+    if (ConfigSettings.enableSecureHttp)
+    {
+      if(!request->authenticate(ConfigSettings.userHTTP, ConfigSettings.passHTTP) )
+        return request->requestAuthentication();
+    }
+    handleSaveWifiCreds(request);
   });
 
   serverWeb.on("/tools", HTTP_GET, [](AsyncWebServerRequest *request)
