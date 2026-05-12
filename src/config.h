@@ -2,7 +2,7 @@
 
 #include <Arduino.h>
 
-#define VERSION "v1.21-smartevse"
+#define VERSION "v1.22-smartevse"
 
 
 // ma structure configCRC error
