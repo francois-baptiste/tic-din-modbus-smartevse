@@ -379,6 +379,13 @@ modpoll -m rtu -a 11 -r 1 -c 35 -t 4 /dev/ttyUSB0
 
 ## Changelog
 
+### Version v1.18-smartevse
+* Add temporary power-on WiFi window to prevent lockout when WiFi is disabled
+  * When WiFi is disabled (via Modbus register 666 or settings), the device still starts the Access Point and Web Server for **2 minutes** on every boot
+  * This prevents users from being permanently locked out of the web UI if no Modbus master is available to re-enable WiFi
+  * A live countdown is displayed in the Network status page while the temporary window is active
+  * If the user enables WiFi during the window, the temporary state is cleared and WiFi stays permanently enabled
+
 ### Version v1.17-smartevse
 * Fix SDM630 Current L1/L2/L3 = 0 on single-phase (monophasé) Linky meters
   * On monophasé meters the TIC frame emits only `SINSTS` (total apparent power) — `SINSTS1` is never transmitted. The SDM630 L1 current register (FC=04, regs 6-7) was derived from `SINSTS1 ÷ URMS1` and was always 0, causing SmartEVSE (Eastron3P mode) to read 0 A on all phases
