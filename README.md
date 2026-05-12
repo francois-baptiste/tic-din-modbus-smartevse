@@ -379,6 +379,12 @@ modpoll -m rtu -a 11 -r 1 -c 35 -t 4 /dev/ttyUSB0
 
 ## Changelog
 
+### Version v1.20-smartevse
+* Add hardware lockout recovery — hold the **BOOT button (GPIO 9)** for **5 seconds** at power-on to reset WiFi credentials to factory defaults
+  * LED blinks rapidly during the 5-second countdown; 10 rapid flashes confirm the reset; release early to cancel
+  * Credentials reset to: SSID = `LIXEETIC-XXXX`, password = `adminXXXX` (XXXX = last 4 hex digits of MAC, uppercase); WiFi forced on
+  * Documented in the Help page (Config → Help → Lockout recovery)
+
 ### Version v1.19-smartevse
 * Enable the real WiFi cutoff — temporary window now fully active
   * WiFi is genuinely disabled when the 2-minute boot window expires or when register 666 is set to 0

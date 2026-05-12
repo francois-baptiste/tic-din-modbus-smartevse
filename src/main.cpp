@@ -15,6 +15,8 @@
 
 #define BUF_SIZE (1024)
 #define WL_MAC_ADDR_LENGTH 6
+#define BOOT_BUTTON_PIN 9   // ESP32-C3 BOOT button (active LOW, internal pull-up)
+#define RESET_LED_PIN   3   // same pin as LED_PIN in led.cpp
 
 ConfigSettingsStruct ConfigSettings;
 #define FORMAT_LittleFS_IF_FAILED true
@@ -269,6 +271,42 @@ void setupWifiAP() {
     WiFi.setSleep(false);
 }
 
+// ── Lockout recovery: hold BOOT button (GPIO9) for 5 s at power-on ───────────
+
+static void checkResetButton() {
+    pinMode(BOOT_BUTTON_PIN, INPUT_PULLUP);
+    if (digitalRead(BOOT_BUTTON_PIN) != LOW) return;
+
+    Serial.println(F("BOOT held — keep holding 5 s to reset WiFi credentials, release to cancel"));
+    unsigned long start = millis();
+    const unsigned long HOLD_MS = 5000;
+
+    while (millis() - start < HOLD_MS) {
+        if (digitalRead(BOOT_BUTTON_PIN) != LOW) {
+            Serial.println(F("BOOT released early — reset cancelled"));
+            return;
+        }
+        // Fast blink as countdown indicator
+        digitalWrite(RESET_LED_PIN, HIGH); delay(150);
+        digitalWrite(RESET_LED_PIN, LOW);  delay(150);
+    }
+
+    // Still held after 5 s — clear credentials
+    Serial.println(F("Resetting WiFi credentials to factory defaults!"));
+    for (int i = 0; i < 10; i++) {
+        digitalWrite(RESET_LED_PIN, HIGH); delay(80);
+        digitalWrite(RESET_LED_PIN, LOW);  delay(80);
+    }
+
+    DynamicJsonDocument doc(256);
+    doc["enableWiFi"] = 1;
+    doc["ssid"]       = "";
+    doc["pass"]       = "";
+    File f = LittleFS.open("/config/configWifi.json", "w+");
+    if (f && !f.isDirectory()) { serializeJson(doc, f); f.close(); }
+    Serial.println(F("Credentials cleared. Booting with default MAC-based AP."));
+}
+
 // ── Setup ─────────────────────────────────────────────────────────────────────
 
 void setup() {
@@ -286,6 +324,8 @@ void setup() {
         return;
     }
     Serial.println(F("LittleFS OK"));
+
+    checkResetButton();
 
     if (!loadConfigWifi()) {
         Serial.println(F("Erreur Loadconfig LittleFS"));
