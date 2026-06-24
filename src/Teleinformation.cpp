@@ -219,6 +219,49 @@ static uint32_t s_energy_ms   = 0;
 static float    s_power_ema_w = 0.0f;
 static bool     s_east_init   = false;
 
+static void updateComputedActivePower() {
+    float total_apparent = (float)s_sinsts_va;
+    float total_active = s_power_ema_w;
+
+    if (total_apparent <= 0.0f) {
+        total_apparent = 0.0f;
+        total_active = 0.0f; // Force active power to 0 if apparent is 0
+    } else {
+        // Cap total_active to total_apparent to avoid PF > 1
+        if (total_active > total_apparent) {
+            total_active = total_apparent;
+        }
+    }
+
+    float pf = (total_apparent > 0.0f) ? (total_active / total_apparent) : 1.0f;
+    if (pf < 0.0f) pf = 0.0f;
+
+    // Update global and per-phase Power Factors
+    sdm630WriteFloat(SDM630_TOTAL_POWER_FACTOR, pf);
+
+    if (s_sinsts1_set) {
+        float l1 = (float)s_sinsts1_va * pf;
+        float l2 = (float)s_sinsts2_va * pf;
+        float l3 = (float)s_sinsts3_va * pf;
+        sdm630WriteFloat(SDM630_L1_ACTIVE_POWER, l1);
+        sdm630WriteFloat(SDM630_L2_ACTIVE_POWER, l2);
+        sdm630WriteFloat(SDM630_L3_ACTIVE_POWER, l3);
+        sdm630WriteFloat(SDM630_L1_POWER_FACTOR, pf);
+        sdm630WriteFloat(SDM630_L2_POWER_FACTOR, pf);
+        sdm630WriteFloat(SDM630_L3_POWER_FACTOR, pf);
+    } else {
+        // Single phase
+        sdm630WriteFloat(SDM630_L1_ACTIVE_POWER, total_active);
+        sdm630WriteFloat(SDM630_L2_ACTIVE_POWER, 0.0f);
+        sdm630WriteFloat(SDM630_L3_ACTIVE_POWER, 0.0f);
+        sdm630WriteFloat(SDM630_L1_POWER_FACTOR, pf);
+        sdm630WriteFloat(SDM630_L2_POWER_FACTOR, 1.0f);
+        sdm630WriteFloat(SDM630_L3_POWER_FACTOR, 1.0f);
+    }
+
+    sdm630WriteFloat(SDM630_TOTAL_ACTIVE_POWER, total_active);
+}
+
 
 
 
@@ -244,7 +287,7 @@ static void applyEnergyDelta(uint64_t delta_wh, uint32_t now_ms) {
         s_power_ema_w = P_raw;
     else
         s_power_ema_w = alpha * P_raw + (1.0f - alpha) * s_power_ema_w;
-    sdm630WriteFloat(SDM630_TOTAL_ACTIVE_POWER, s_power_ema_w);
+    updateComputedActivePower();
 }
 
 static void standardEnergyUpdate(uint64_t wh) {
@@ -461,24 +504,27 @@ static void dispatchSfx(TicSfx sfx, uint64_t v) {
             s_sinsts_va = v32u;
             sdm630WriteFloat(SDM630_TOTAL_APPARENT_VA, (float)v32u);
             if (!s_sinsts1_set) updateComputedCurrentL1();
+            updateComputedActivePower();
             break;
         case SFX_SINSTS1:
             s_sinsts1_va = v32u;
             s_sinsts1_set = true;
             sdm630WriteFloat(SDM630_L1_APPARENT_POWER, (float)v32u);
             updateComputedCurrentL1();
+            updateComputedActivePower();
             break;
         case SFX_SINSTS2:
             s_sinsts2_va = v32u;
             sdm630WriteFloat(SDM630_L2_APPARENT_POWER, (float)v32u);
+            updateComputedActivePower();
             break;
         case SFX_SINSTS3:
             s_sinsts3_va = v32u;
             sdm630WriteFloat(SDM630_L3_APPARENT_POWER, (float)v32u);
+            updateComputedActivePower();
             break;
         case SFX_CCASN:
             s_ccasn_w = v32u;
-            sdm630WriteFloat(SDM630_L1_ACTIVE_POWER, (float)v32u);
             sdm630WriteFloat(SDM630_CCASN_W, (float)v32u);
             break;
         case SFX_STGE: {
