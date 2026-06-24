@@ -219,8 +219,37 @@ static uint32_t s_energy_ms   = 0;
 static float    s_power_ema_w = 0.0f;
 static bool     s_east_init   = false;
 
+static void updateComputedActivePower() {
+    // Wait until EMA has been seeded — preserves the initialised PF=1.0 at boot
+    if (s_power_ema_w == 0.0f) return;
 
+    float apparent = (float)s_sinsts_va;
+    float active   = s_power_ema_w;
 
+    // Cap to avoid PF > 1 (EMA can momentarily exceed apparent on a sudden load drop)
+    if (apparent > 0.0f && active > apparent) active = apparent;
+
+    float pf = (apparent > 0.0f) ? (active / apparent) : 1.0f;
+
+    sdm630WriteFloat(SDM630_TOTAL_ACTIVE_POWER, active);
+    sdm630WriteFloat(SDM630_TOTAL_POWER_FACTOR, pf);
+
+    if (s_sinsts1_set) {
+        sdm630WriteFloat(SDM630_L1_ACTIVE_POWER, (float)s_sinsts1_va * pf);
+        sdm630WriteFloat(SDM630_L2_ACTIVE_POWER, (float)s_sinsts2_va * pf);
+        sdm630WriteFloat(SDM630_L3_ACTIVE_POWER, (float)s_sinsts3_va * pf);
+        sdm630WriteFloat(SDM630_L1_POWER_FACTOR, pf);
+        sdm630WriteFloat(SDM630_L2_POWER_FACTOR, pf);
+        sdm630WriteFloat(SDM630_L3_POWER_FACTOR, pf);
+    } else {
+        sdm630WriteFloat(SDM630_L1_ACTIVE_POWER, active);
+        sdm630WriteFloat(SDM630_L2_ACTIVE_POWER, 0.0f);
+        sdm630WriteFloat(SDM630_L3_ACTIVE_POWER, 0.0f);
+        sdm630WriteFloat(SDM630_L1_POWER_FACTOR, pf);
+        sdm630WriteFloat(SDM630_L2_POWER_FACTOR, 0.0f);
+        sdm630WriteFloat(SDM630_L3_POWER_FACTOR, 0.0f);
+    }
+}
 
 
 
@@ -244,7 +273,7 @@ static void applyEnergyDelta(uint64_t delta_wh, uint32_t now_ms) {
         s_power_ema_w = P_raw;
     else
         s_power_ema_w = alpha * P_raw + (1.0f - alpha) * s_power_ema_w;
-    sdm630WriteFloat(SDM630_TOTAL_ACTIVE_POWER, s_power_ema_w);
+    updateComputedActivePower();
 }
 
 static void standardEnergyUpdate(uint64_t wh) {
@@ -461,6 +490,7 @@ static void dispatchSfx(TicSfx sfx, uint64_t v) {
             s_sinsts_va = v32u;
             sdm630WriteFloat(SDM630_TOTAL_APPARENT_VA, (float)v32u);
             if (!s_sinsts1_set) updateComputedCurrentL1();
+            updateComputedActivePower(); // called here only — after total apparent is settled
             break;
         case SFX_SINSTS1:
             s_sinsts1_va = v32u;
@@ -478,8 +508,13 @@ static void dispatchSfx(TicSfx sfx, uint64_t v) {
             break;
         case SFX_CCASN:
             s_ccasn_w = v32u;
-            sdm630WriteFloat(SDM630_L1_ACTIVE_POWER, (float)v32u);
             sdm630WriteFloat(SDM630_CCASN_W, (float)v32u);
+            // Cold-start fallback: populate active power registers from CCASN
+            // until the energy-delta EMA is seeded by the first EAST tick
+            if (s_power_ema_w == 0.0f && v32u > 0) {
+                sdm630WriteFloat(SDM630_L1_ACTIVE_POWER, (float)v32u);
+                sdm630WriteFloat(SDM630_TOTAL_ACTIVE_POWER, (float)v32u);
+            }
             break;
         case SFX_STGE: {
             extern void updatePowerOverflow(bool overflow);
