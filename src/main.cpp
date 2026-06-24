@@ -434,6 +434,6 @@ void loop() {
         u32Timeout    = 0;
     }
 
-    delay(10);
+    delay(1);
     u32Timeout++;
 }
