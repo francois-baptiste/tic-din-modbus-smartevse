@@ -21,8 +21,8 @@
 #include "microtar.h"
 
 extern struct ConfigSettingsStruct ConfigSettings;
-extern uint16_t holdingRegisters[24600];
-extern uint16_t sdm630InputRegisters[60];
+extern uint16_t wifi_modbus_reg_666;
+extern uint16_t sdm630InputRegisters[622];
 
 
 HTTPClient clientWeb;
@@ -470,58 +470,10 @@ void handleStatusNetwork(AsyncWebServerRequest *request)
   response->print(F("<table><tr><td><strong>Registry</strong></td><td><strong>Value</strong></td></tr>"));
 
   // Row helpers (lambdas capture response by reference)
-  auto rowI32 = [&](const char* lbl, uint16_t base) {
-    int32_t v = (int32_t)(((uint32_t)holdingRegisters[base] << 16) | holdingRegisters[base + 1]);
-    response->printf("<tr><td><strong>%s</strong></td><td>%d</td></tr>", lbl, (int)v);
-  };
-  auto rowF32 = [&](const char* lbl, uint16_t base) {
-    uint32_t bits = ((uint32_t)holdingRegisters[base] << 16) | holdingRegisters[base + 1];
-    float f; memcpy(&f, &bits, 4);
-    response->printf("<tr><td><strong>%s</strong></td><td>%.2f A</td></tr>", lbl, (double)f);
-  };
-  auto rowF32dim = [&](const char* lbl, uint16_t base) {
-    uint32_t bits = ((uint32_t)holdingRegisters[base] << 16) | holdingRegisters[base + 1];
-    float f; memcpy(&f, &bits, 4);
-    response->printf("<tr><td><strong>%s</strong></td><td>%.4f</td></tr>", lbl, (double)f);
-  };
-  auto rowU16 = [&](const char* lbl, uint16_t reg) {
-    response->printf("<tr><td><strong>%s</strong></td><td>%u</td></tr>", lbl, (unsigned)holdingRegisters[reg]);
-  };
-  auto rowU64 = [&](const char* lbl, uint16_t top) {
-    uint64_t v = 0;
-    for (int i = 0; i < 4; i++) v |= ((uint64_t)holdingRegisters[top - i] << (i * 16));
-    response->printf("<tr><td><strong>%s</strong></td><td>%llu</td></tr>", lbl, (unsigned long long)v);
-  };
   auto rowStr = [&](const char* lbl, uint16_t base, uint16_t len) {
-    response->printf("<tr><td><strong>%s</strong></td><td>", lbl);
-    for (int i = 0; i < len; i++) { char c = (char)(holdingRegisters[base + i] & 0xFF); if (c) response->write((uint8_t)c); }
-    response->print(F("</td></tr>"));
   };
 
   // SmartEVSE Custom Meter (FC=03, regs 0-34)
-  response->print(F("<tr><td colspan='2'><strong>&mdash; SmartEVSE Custom Meter FC=03 (regs 0&ndash;34) &mdash;</strong></td></tr>"));
-  rowI32("0-1 IRMS1 (mA) :", 0);
-  rowI32("2-3 IRMS2 (mA) :", 2);
-  rowI32("4-5 IRMS3 (mA) :", 4);
-  rowI32("6-7 URMS1 (V\xc3\x97""10) :", 6);
-  rowI32("8-9 URMS2 (V\xc3\x97""10) :", 8);
-  rowI32("10-11 URMS3 (V\xc3\x97""10) :", 10);
-  rowI32("12-13 PAPP (VA) :", 12);
-  rowI32("14-15 PAPP1 (VA) :", 14);
-  rowI32("16-17 PAPP2 (VA) :", 16);
-  rowI32("18-19 PAPP3 (VA) :", 18);
-  rowF32("20-21 I total (FLOAT32) :", 20);
-  rowU16("22 I total (A\xc3\x97""100) :", 22);
-  rowF32("23-24 I L1 (FLOAT32) :", 23);
-  rowU16("25 I L1 (A\xc3\x97""100) :", 25);
-  rowF32("26-27 I L2 (FLOAT32) :", 26);
-  rowU16("28 I L2 (A\xc3\x97""100) :", 28);
-  rowF32("29-30 I L3 (FLOAT32) :", 29);
-  rowU16("31 I L3 (A\xc3\x97""100) :", 31);
-  rowF32dim("32-33 cos\xcf\x86""  total (FLOAT32) :", 32);
-  rowU16("34 cos\xcf\x86""  total (\xc3\x97""1000) :", 34);
-
-  // Eastron SDM630 input registers (FC=04)
   response->print(F("<tr><td colspan='2'><strong>&mdash; Eastron SDM630 FC=04 (input regs) &mdash;</strong></td></tr>"));
   auto sdm630F = [&](const char* lbl, uint16_t base, const char* unit) {
     uint32_t bits = ((uint32_t)sdm630InputRegisters[base] << 16) | sdm630InputRegisters[base + 1];
@@ -546,79 +498,40 @@ void handleStatusNetwork(AsyncWebServerRequest *request)
   sdm630F("52-53 Total active pwr :", 52, "W");
   sdm630F("56-57 Total apparent pwr :", 56, "VA");
   sdm630F("58-59 Total PF :", 58, "");
+  sdm630F("62-63 Total PF :", 62, "");
+
+  response->print(F("<tr><td colspan='2'><strong>&mdash; Extended Custom Modbus Registers (FC=04) &mdash;</strong></td></tr>"));
+  sdm630F("342-343 Total Active Energy :", 342, "kWh");
+  sdm630F("500-501 Tempo Blue Total :", 500, "kWh");
+  sdm630F("502-503 Tempo White Total :", 502, "kWh");
+  sdm630F("504-505 Tempo Red Total :", 504, "kWh");
+  sdm630F("506-507 Total HP :", 506, "kWh");
+  sdm630F("508-509 Total HC :", 508, "kWh");
+  sdm630F("510-511 Blue HC :", 510, "kWh");
+  sdm630F("512-513 Blue HP :", 512, "kWh");
+  sdm630F("514-515 White HC :", 514, "kWh");
+  sdm630F("516-517 White HP :", 516, "kWh");
+  sdm630F("518-519 Red HC :", 518, "kWh");
+  sdm630F("520-521 Red HP :", 520, "kWh");
+
+  sdm630F("600-601 Is Tempo Blue :", 600, "");
+  sdm630F("601-602 Is Tempo White :", 601, "");
+  sdm630F("602-603 Is Tempo Red :", 602, "");
+  sdm630F("603-604 Is HP :", 603, "");
+  sdm630F("604-605 Is HC :", 604, "");
+  sdm630F("605-606 Is Base Tariff :", 605, "");
+  sdm630F("606-607 Is HPHC Tariff :", 606, "");
+  sdm630F("607-608 Is Tempo Tariff :", 607, "");
+  sdm630F("608-609 Is Power Overflow :", 608, "");
+  sdm630F("609-610 Contracted Power :", 609, "kVA");
+  sdm630F("612-613 Temperature :", 612, "&deg;C");
+
+  sdm630F("614-615 Active Power (mv avg) :", 614, "W");
+  sdm630F("616-617 Apparent Power (mv avg) :", 616, "VA");
+  sdm630F("618-619 Current L1 (mv avg) :", 618, "A");
+  sdm630F("620-621 Voltage L1 (mv avg) :", 620, "V");
 
   // TIC Modbus Mapping
-  response->print(F("<tr><td colspan='2'><strong>&mdash; TIC Modbus Mapping &mdash;</strong></td></tr>"));
-  // Note: reusing tmp variable below for legacy string rows
-  long long tmp;
-  rowU64("300-303 :", 303);
-  rowStr("2000-2099 :", 2000, 50);
-  rowStr("2100-2199 :", 2100, 50);
-  rowStr("2200-2299 :", 2200, 50);
-  rowStr("2300-2399 :", 2300, 50);
-  rowU64("1000-1003 :", 1003);
-  rowU64("1004-1007 :", 1007);
-  rowU64("1008-1011 :", 1011);
-  rowU64("1012-1015 :", 1015);
-  rowU64("1016-1019 :", 1019);
-  rowU64("1020-1023 :", 1023);
-  rowU64("1024-1027 :", 1027);
-  rowU64("1028-1031 :", 1031);
-  rowU64("1032-1035 :", 1035);
-  rowU64("1036-1039 :", 1039);
-  rowU64("1040-1043 :", 1043);
-  rowU64("1100-1103 :", 1103);
-  rowU64("1104-1107 :", 1107);
-  rowU64("1108-1111 :", 1111);
-  rowU64("1112-1115 :", 1115);
-  rowU64("1200-1203 :", 1203);
-  rowU64("1300-1303 :", 1303);
-  rowU64("1304-1307 :", 1307);
-  rowU64("1308-1311 :", 1311);
-  rowU64("1312-1315 :", 1315);
-  rowU16("1320 :", 1320);
-  rowU16("1321 :", 1321);
-  rowU16("1322 :", 1322);
-  rowU16("1323 :", 1323);
-  rowU16("1324 :", 1324);
-  rowU16("1325 :", 1325);
-  rowU16("1398 :", 1398);
-  rowU16("1399 :", 1399);
-  rowU16("1326 :", 1326);
-  rowU16("1327 :", 1327);
-  rowU16("1328 :", 1328);
-  rowU64("1329-1332 :", 1332);
-  rowU64("1333-1336 :", 1336);
-  rowU64("1337-1340 :", 1340);
-  rowU64("1341-1344 :", 1344);
-  rowU64("1345-1348 :", 1348);
-  rowU64("1353-1356 :", 1356);
-  rowU64("1357-1360 :", 1360);
-  rowU64("1361-1364 :", 1364);
-  rowU64("1365-1368 :", 1368);
-  rowU64("1369-1372 :", 1372);
-  rowU64("1400-1403 :", 1403);
-  rowU64("1404-1407 :", 1407);
-  rowU64("1408-1411 :", 1411);
-  rowU64("1412-1415 :", 1415);
-  rowU64("1416-1419 :", 1419);
-  rowU64("1500-1503 :", 1503);
-  rowU64("1504-1507 :", 1507);
-  rowU16("1600 :", 1600);
-  rowU16("1601 :", 1601);
-  rowU16("1602 :", 1602);
-  rowU16("1603 :", 1603);
-  rowU16("1604 :", 1604);
-  rowU16("1605 :", 1605);
-  rowU16("1606 :", 1606);
-  rowU16("1700 :", 1700);
-  rowStr("3000-3099 :", 3000, 50);
-  rowStr("4000-4099 :", 4000, 50);
-  rowStr("5000-5099 :", 5000, 50);
-  rowStr("6000-6099 :", 6000, 50);
-  rowStr("6100-6199 :", 6100, 50);
-  rowStr("7000-7099 :", 7000, 50);
-
   response->print(F("</table></div></div></div>"));
   response->print(FPSTR(HTTP_FOOTER));
   response->print(F("</html>"));
@@ -1325,7 +1238,7 @@ void handleSaveWifi(AsyncWebServerRequest *request)
       isTemporaryWifi = false;
   }
   ConfigSettings.enableWiFi = wifiOn;
-  holdingRegisters[666] = wifiOn ? 1 : 0;
+  wifi_modbus_reg_666 = wifiOn ? 1 : 0;
 
   auto writeWifiConfig = [&]() {
     DynamicJsonDocument doc(512);
@@ -1368,7 +1281,7 @@ void handleSaveWifiState(AsyncWebServerRequest *request)
   bool wifiOn = (request->arg("wifiEnable") == "on");
   if (wifiOn && isTemporaryWifi) isTemporaryWifi = false;
   ConfigSettings.enableWiFi = wifiOn;
-  holdingRegisters[666] = wifiOn ? 1 : 0;
+  wifi_modbus_reg_666 = wifiOn ? 1 : 0;
 
   DynamicJsonDocument doc(512);
   doc["enableWiFi"] = wifiOn ? 1 : 0;

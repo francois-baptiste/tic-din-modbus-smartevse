@@ -22,12 +22,13 @@ ConfigSettingsStruct ConfigSettings;
 #define FORMAT_LittleFS_IF_FAILED true
 
 bool configOK = false;
+uint16_t wifi_modbus_reg_666 = 0;
+
 String modeWiFi = "STA";
 
 TimerHandle_t WifiReconnectTimer;
 
-uint16_t holdingRegisters[24600];
-uint16_t sdm630InputRegisters[60];   // FC=04 — Eastron SDM630 register layout
+uint16_t sdm630InputRegisters[622];   // FC=04 — Eastron SDM630 register layout
 ModbusRTUSlave modbus(Serial1, 5);
 
 uint32_t u32Timeout = 0;
@@ -199,7 +200,7 @@ bool loadConfigWifi() {
     deserializeJson(doc, configFile);
     ConfigSettings.enableWiFi = (int)doc["enableWiFi"];
     oldWiFiState = ConfigSettings.enableWiFi;
-    holdingRegisters[666] = ConfigSettings.enableWiFi;
+    wifi_modbus_reg_666 = ConfigSettings.enableWiFi;
     strlcpy(ConfigSettings.ssid,     doc["ssid"] | "", sizeof(ConfigSettings.ssid));
     strlcpy(ConfigSettings.password, doc["pass"] | "", sizeof(ConfigSettings.password));
     configFile.close();
@@ -346,7 +347,7 @@ void setup() {
     } else {
         if (ConfigSettings.enableWiFi) {
             Serial.println(F("configOK - WiFi Enabled"));
-            holdingRegisters[666] = 1;
+            wifi_modbus_reg_666 = 1;
             setupWifiAP();
             modeWiFi = "AP";
         } else {
@@ -354,7 +355,7 @@ void setup() {
             // Start temporary WiFi window of 2 minutes (120000 ms)
             isTemporaryWifi = true;
             wifiWindowEndMillis = millis() + 120000;
-            holdingRegisters[666] = 1; // Temporarily show as enabled
+            wifi_modbus_reg_666 = 1; // Temporarily show as enabled
             oldWiFiState = 1;
             setupWifiAP();
             modeWiFi = "AP";
@@ -369,8 +370,7 @@ void setup() {
         modbusSerialConfig = SERIAL_8E1;
     else if (strcmp(ConfigSettings.modbus_parity, "Odd") == 0)
         modbusSerialConfig = SERIAL_8O1;
-    modbus.configureHoldingRegisters(holdingRegisters, 24600);
-    modbus.configureInputRegisters(sdm630InputRegisters, 60);
+    modbus.configureInputRegisters(sdm630InputRegisters, 622);
     modbus.begin(ConfigSettings.modbus_id, atoi(ConfigSettings.modbus_bauds), modbusSerialConfig);
 
     loadConfigHTTP();
@@ -388,14 +388,14 @@ void loop() {
     // Check temporary WiFi window timeout
     if (isTemporaryWifi && millis() > wifiWindowEndMillis) {
         isTemporaryWifi = false;
-        holdingRegisters[666] = 0;
+        wifi_modbus_reg_666 = 0;
         oldWiFiState = 0;
         disableWiFi = true;
         Serial.println("Temporary WiFi window expired. Disabling WiFi.");
     }
 
     // WiFi enable/disable via holding register 666
-    if (holdingRegisters[666] == 1) {
+    if (wifi_modbus_reg_666 == 1) {
         if (oldWiFiState == 0) {
             isTemporaryWifi = false;
             oldWiFiState = 1;
@@ -404,7 +404,7 @@ void loop() {
             config_write("configWifi.json", "enableWiFi", String(oldWiFiState));
             Serial.println("WiFi enabled");
         }
-    } else if (holdingRegisters[666] == 0) {
+    } else if (wifi_modbus_reg_666 == 0) {
         if (oldWiFiState == 1) {
             oldWiFiState = 0;
             disableWiFi  = true;
