@@ -117,6 +117,14 @@ static float s_easd02 = 0;
 static float s_easd03 = 0;
 static float s_easd04 = 0;
 
+// Compute current from Active Power / Voltage (assuming PF=1 for higher precision)
+static void updateComputedCurrentL1() {
+    if (s_urms1_v > 0 && s_ccasn_w > 0) {
+        float current = (float)s_ccasn_w / (float)s_urms1_v;
+        sdm630WriteFloat(SDM630_L1_CURRENT, current);
+    }
+}
+
 // ── Moving Average & Latch Logic (10s window, updated every 2s) ──
 static float mv_active_power[5] = {0};
 static float mv_apparent_power[5] = {0};
@@ -407,18 +415,13 @@ static void dispatchSfx(TicSfx sfx, uint64_t v) {
         case SFX_EASD02: s_easd02 = (float)v / 1000.0f; sdm630WriteFloat(SDM630_TOTAL_HP_KWH, s_easd02); break;
         case SFX_EASD03: s_easd03 = (float)v / 1000.0f; break;
         case SFX_EASD04: s_easd04 = (float)v / 1000.0f; break;
-        case SFX_IRMS1:
-            sdm630WriteFloat(SDM630_L1_CURRENT, (float)v);
-            break;
-        case SFX_IRMS2:
-            sdm630WriteFloat(SDM630_L2_CURRENT, (float)v);
-            break;
-        case SFX_IRMS3:
-            sdm630WriteFloat(SDM630_L3_CURRENT, (float)v);
-            break;
+        case SFX_IRMS1: break;
+        case SFX_IRMS2: break;
+        case SFX_IRMS3: break;
         case SFX_URMS1:
             s_urms1_v = v16;
             sdm630WriteFloat(SDM630_L1_VOLTAGE, (float)v16);
+            updateComputedCurrentL1();
             break;
         case SFX_URMS2:
             s_urms2_v = v16;
@@ -449,6 +452,7 @@ static void dispatchSfx(TicSfx sfx, uint64_t v) {
         case SFX_CCASN:
             s_ccasn_w = v32u;
             sdm630WriteFloat(SDM630_L1_ACTIVE_POWER, (float)v32u);
+            updateComputedCurrentL1();
             break;
         case SFX_STGE: {
             extern void updatePowerOverflow(bool overflow);
