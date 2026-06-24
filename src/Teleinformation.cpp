@@ -11,24 +11,10 @@ static uint8_t      s_crc_rx   = 0;   // last received byte when pos≥2 (become
 static uint8_t      s_crc_acc  = 0;   // running sum: label+TAB+horodate+TAB+value+TAB
 static uint8_t      s_crc_snap = 0;   // snapshot of s_crc_acc at the separator after value
 
-extern uint16_t             holdingRegisters[24600];
-extern uint16_t             sdm630InputRegisters[60];
+extern uint16_t             sdm630InputRegisters[622];
 extern uint32_t             u32Timeout;
 extern uint8_t              u8ErrorDecode;
 extern ConfigSettingsStruct ConfigSettings;
-
-// ── SmartEVSE v3.1 mirror registers (0–19) — INT32 big-endian (high word first)
-// Configure SmartEVSE Custom Meter: FC=3, INT32, endian HBF_HWF(3), IDivisor=3, UDivisor=1, PDivisor=0
-#define SE_IRMS1_REG  0   // Current L1 (mA)
-#define SE_IRMS2_REG  2   // Current L2 (mA)
-#define SE_IRMS3_REG  4   // Current L3 (mA)
-#define SE_URMS1_REG  6   // Voltage L1 (V*10)
-#define SE_URMS2_REG  8   // Voltage L2 (V*10)
-#define SE_URMS3_REG  10  // Voltage L3 (V*10)
-#define SE_PAPP_REG   12  // Total apparent power (VA)
-#define SE_PAPP1_REG  14  // L1 apparent power (VA)
-#define SE_PAPP2_REG  16  // L2 apparent power (VA)
-#define SE_PAPP3_REG  18  // L3 apparent power (VA)
 
 // ── Eastron SDM630 input register addresses (FC=04, IEEE 754 float32 big-endian)
 #define SDM630_L1_VOLTAGE          0
@@ -48,7 +34,38 @@ extern ConfigSettingsStruct ConfigSettings;
 #define SDM630_L3_POWER_FACTOR    34
 #define SDM630_TOTAL_ACTIVE_POWER 52
 #define SDM630_TOTAL_APPARENT_VA  56
-#define SDM630_TOTAL_POWER_FACTOR 58
+#define SDM630_TOTAL_POWER_FACTOR 62
+
+#define SDM630_TOTAL_ACTIVE_ENERGY  342
+#define SDM630_TEMPO_BLUE_KWH       500
+#define SDM630_TEMPO_WHITE_KWH      502
+#define SDM630_TEMPO_RED_KWH        504
+#define SDM630_TOTAL_HP_KWH         506
+#define SDM630_TOTAL_HC_KWH         508
+#define SDM630_BLUE_HC_KWH          510
+#define SDM630_BLUE_HP_KWH          512
+#define SDM630_WHITE_HC_KWH         514
+#define SDM630_WHITE_HP_KWH         516
+#define SDM630_RED_HC_KWH           518
+#define SDM630_RED_HP_KWH           520
+
+#define SDM630_IS_TEMPO_BLUE        600
+#define SDM630_IS_TEMPO_WHITE       601
+#define SDM630_IS_TEMPO_RED         602
+#define SDM630_IS_HP                603
+#define SDM630_IS_HC                604
+#define SDM630_IS_BASE_TARIFF       605
+#define SDM630_IS_HPHC_TARIFF       606
+#define SDM630_IS_TEMPO_TARIFF      607
+#define SDM630_IS_POWER_OVERFLOW    608
+
+#define SDM630_CONTRACTED_POWER     609
+#define SDM630_TEMPERATURE          612
+
+#define SDM630_ACTIVE_POWER_W_MVAVG      614
+#define SDM630_APPARENT_POWER_VA_MVAVG   616
+#define SDM630_CURRENT_L1_A_MVAVG        618
+#define SDM630_VOLTAGE_L1_V_MVAVG        620
 
 static void sdm630WriteFloat(uint16_t reg, float value) {
     uint32_t bits;
@@ -57,10 +74,7 @@ static void sdm630WriteFloat(uint16_t reg, float value) {
     sdm630InputRegisters[reg + 1] = (uint16_t)(bits & 0xFFFF);
 }
 
-static void seWriteInt32(uint16_t reg, int32_t value) {
-    holdingRegisters[reg]     = (uint16_t)((value >> 16) & 0xFFFF);
-    holdingRegisters[reg + 1] = (uint16_t)(value & 0xFFFF);
-}
+
 
 // High-precision current registers — total and per-phase
 #define SE_PRECISE_I_FLOAT_REG   20
@@ -92,69 +106,99 @@ static bool     s_urms2_set  = false;
 static bool     s_urms3_set  = false;
 static uint32_t s_ccasn_w    = 0;
 
+static float s_easf01 = 0;
+static float s_easf02 = 0;
+static float s_easf03 = 0;
+static float s_easf04 = 0;
+static float s_easf05 = 0;
+static float s_easf06 = 0;
+static float s_easd01 = 0;
+static float s_easd02 = 0;
+static float s_easd03 = 0;
+static float s_easd04 = 0;
+
+// ── Moving Average & Latch Logic (10s window, updated every 2s) ──
+static float mv_active_power[5] = {0};
+static float mv_apparent_power[5] = {0};
+static float mv_current_l1[5] = {0};
+static float mv_voltage_l1[5] = {0};
+static bool mv_power_overflow[5] = {false};
+static uint8_t mv_idx = 0;
+static uint32_t last_mv_update = 0;
+
+void updatePowerOverflow(bool overflow) {
+    mv_power_overflow[mv_idx] = overflow; // Latch it into the current bucket
+}
+
+void processMovingAverages() {
+    uint32_t now = millis();
+    if (now - last_mv_update >= 2000) {
+        last_mv_update = now;
+
+        mv_idx = (mv_idx + 1) % 5;
+
+        float f_active_power, f_apparent_power, f_current_l1, f_voltage_l1;
+        uint32_t bits;
+
+        bits = ((uint32_t)sdm630InputRegisters[SDM630_TOTAL_ACTIVE_POWER] << 16) | sdm630InputRegisters[SDM630_TOTAL_ACTIVE_POWER + 1];
+        memcpy(&f_active_power, &bits, 4);
+
+        bits = ((uint32_t)sdm630InputRegisters[SDM630_TOTAL_APPARENT_VA] << 16) | sdm630InputRegisters[SDM630_TOTAL_APPARENT_VA + 1];
+        memcpy(&f_apparent_power, &bits, 4);
+
+        bits = ((uint32_t)sdm630InputRegisters[SDM630_L1_CURRENT] << 16) | sdm630InputRegisters[SDM630_L1_CURRENT + 1];
+        memcpy(&f_current_l1, &bits, 4);
+
+        bits = ((uint32_t)sdm630InputRegisters[SDM630_L1_VOLTAGE] << 16) | sdm630InputRegisters[SDM630_L1_VOLTAGE + 1];
+        memcpy(&f_voltage_l1, &bits, 4);
+
+        mv_active_power[mv_idx] = f_active_power;
+        mv_apparent_power[mv_idx] = f_apparent_power;
+        mv_current_l1[mv_idx] = f_current_l1;
+        mv_voltage_l1[mv_idx] = f_voltage_l1;
+
+        mv_power_overflow[mv_idx] = false;
+
+        float avg_active = 0, avg_apparent = 0, avg_curr = 0, avg_volt = 0;
+        bool any_overflow = false;
+        for (int i = 0; i < 5; i++) {
+            avg_active += mv_active_power[i];
+            avg_apparent += mv_apparent_power[i];
+            avg_curr += mv_current_l1[i];
+            avg_volt += mv_voltage_l1[i];
+            if (mv_power_overflow[i]) any_overflow = true;
+        }
+        avg_active /= 5.0f;
+        avg_apparent /= 5.0f;
+        avg_curr /= 5.0f;
+        avg_volt /= 5.0f;
+
+        sdm630WriteFloat(SDM630_ACTIVE_POWER_W_MVAVG, avg_active);
+        sdm630WriteFloat(SDM630_APPARENT_POWER_VA_MVAVG, avg_apparent);
+        sdm630WriteFloat(SDM630_CURRENT_L1_A_MVAVG, avg_curr);
+        sdm630WriteFloat(SDM630_VOLTAGE_L1_V_MVAVG, avg_volt);
+
+        sdm630InputRegisters[SDM630_IS_POWER_OVERFLOW] = any_overflow ? 1 : 0;
+    }
+}
+
+
 // ── Energy-delta active power estimation ─────────────────────────────────────
 static uint64_t s_east_wh     = 0;
 static uint32_t s_energy_ms   = 0;
 static float    s_power_ema_w = 0.0f;
 static bool     s_east_init   = false;
 
-static void seWriteFloat32(uint16_t reg, float value) {
-    uint32_t bits;
-    memcpy(&bits, &value, 4);
-    holdingRegisters[reg]     = (uint16_t)(bits >> 16);
-    holdingRegisters[reg + 1] = (uint16_t)(bits & 0xFFFF);
-}
 
-static void seWritePreciseCurrent(uint16_t float_reg, uint16_t u16_reg, uint32_t sinsts_va, uint16_t urms_v) {
-    float denom = (urms_v > 0) ? (float)urms_v : 230.0f;
-    float a = (float)sinsts_va / denom;
-    seWriteFloat32(float_reg, a);
-    holdingRegisters[u16_reg] = (uint16_t)(a * 100.0f + 0.5f);
-}
 
-static void seUpdatePreciseCurrent() {
-    uint16_t v = (s_urms2_set && s_urms3_set)
-                 ? (uint16_t)((s_urms1_v + s_urms2_v + s_urms3_v) / 3)
-                 : s_urms1_v;
-    seWritePreciseCurrent(SE_PRECISE_I_FLOAT_REG, SE_PRECISE_I_U16_REG, s_sinsts_va, v);
-}
-static void seUpdatePreciseCurrentL1() {
-    // Single-phase fallback: SINSTS1 absent on monophasé meters — use total SINSTS
-    uint32_t sinsts = (s_sinsts1_va > 0 || s_urms2_set || s_urms3_set)
-                      ? s_sinsts1_va : s_sinsts_va;
-    seWritePreciseCurrent(SE_PRECISE_I1_FLOAT_REG, SE_PRECISE_I1_U16_REG, sinsts, s_urms1_v);
-    float denom = (s_urms1_v > 0) ? (float)s_urms1_v : 230.0f;
-    sdm630WriteFloat(SDM630_L1_CURRENT, (float)sinsts / denom);
-}
-static void seUpdatePreciseCurrentL2() {
-    seWritePreciseCurrent(SE_PRECISE_I2_FLOAT_REG, SE_PRECISE_I2_U16_REG, s_sinsts2_va, s_urms2_v);
-    float denom = (s_urms2_v > 0) ? (float)s_urms2_v : 230.0f;
-    sdm630WriteFloat(SDM630_L2_CURRENT, (float)s_sinsts2_va / denom);
-}
-static void seUpdatePreciseCurrentL3() {
-    seWritePreciseCurrent(SE_PRECISE_I3_FLOAT_REG, SE_PRECISE_I3_U16_REG, s_sinsts3_va, s_urms3_v);
-    float denom = (s_urms3_v > 0) ? (float)s_urms3_v : 230.0f;
-    sdm630WriteFloat(SDM630_L3_CURRENT, (float)s_sinsts3_va / denom);
-}
 
-static void seUpdateCosPhi() {
-    if (s_sinsts_va == 0) return;
-    bool stale = s_east_init && ((uint32_t)millis() - s_energy_ms) > 60000u;
-    float P = (!s_east_init || stale) ? (float)s_ccasn_w : s_power_ema_w;
-    float cos_phi = P / (float)s_sinsts_va;
-    if (cos_phi > 1.0f) cos_phi = 1.0f;
-    seWriteFloat32(SE_COSPHI_FLOAT_REG, cos_phi);
-    holdingRegisters[SE_COSPHI_U16_REG] = (uint16_t)(cos_phi * 1000.0f + 0.5f);
-    // SDM630: power factors and per-phase / total active power
-    sdm630WriteFloat(SDM630_L1_POWER_FACTOR,    cos_phi);
-    sdm630WriteFloat(SDM630_L2_POWER_FACTOR,    cos_phi);
-    sdm630WriteFloat(SDM630_L3_POWER_FACTOR,    cos_phi);
-    sdm630WriteFloat(SDM630_TOTAL_POWER_FACTOR, cos_phi);
-    sdm630WriteFloat(SDM630_TOTAL_ACTIVE_POWER, P);
-    sdm630WriteFloat(SDM630_L1_ACTIVE_POWER, (float)s_sinsts1_va * cos_phi);
-    sdm630WriteFloat(SDM630_L2_ACTIVE_POWER, (float)s_sinsts2_va * cos_phi);
-    sdm630WriteFloat(SDM630_L3_ACTIVE_POWER, (float)s_sinsts3_va * cos_phi);
-}
+
+
+
+
+
+
+
 
 // dt guard (500 ms) rejects anomalously fast back-to-back frames.
 // Stale gap (>60 s): reset EMA so next valid delta seeds fresh.
@@ -180,7 +224,6 @@ static void standardEnergyUpdate(uint64_t wh) {
     if (wh > s_east_wh) {
         applyEnergyDelta(wh - s_east_wh, now);
         s_east_wh = wh;
-        seUpdateCosPhi();
     } else if (s_east_wh > wh + 10000ULL) {
         // Counter rollback (meter replacement or overflow) — re-seed from new baseline
         s_east_wh = wh; s_east_init = false; s_power_ema_w = 0.0f;
@@ -189,17 +232,9 @@ static void standardEnergyUpdate(uint64_t wh) {
 
 // ── Register write helpers ────────────────────────────────────────────────────
 
-static void writeU64BE(uint16_t reg, uint64_t v) {
-    holdingRegisters[reg]     = (uint16_t)(v >> 48);
-    holdingRegisters[reg + 1] = (uint16_t)(v >> 32);
-    holdingRegisters[reg + 2] = (uint16_t)(v >> 16);
-    holdingRegisters[reg + 3] = (uint16_t)(v);
-}
 
-static void writeStr(uint16_t reg, const char *s) {
-    for (size_t k = 0; s[k]; ++k)
-        holdingRegisters[reg + k] = (uint16_t)(uint8_t)s[k];
-}
+
+
 
 // ── Label dispatch table ──────────────────────────────────────────────────────
 
@@ -207,6 +242,10 @@ enum TicType : uint8_t { TY_U16, TY_U64, TY_STR, TY_NONE };
 enum TicSfx  : uint8_t {
     SFX_NONE,
     SFX_EAST,
+    SFX_EASF01, SFX_EASF02, SFX_EASF03, SFX_EASF04, SFX_EASF05, SFX_EASF06, SFX_EASF07, SFX_EASF08, SFX_EASF09, SFX_EASF10,
+    SFX_EASD01, SFX_EASD02, SFX_EASD03, SFX_EASD04,
+    SFX_PREF,
+    SFX_NTARF,
     SFX_IRMS1, SFX_IRMS2, SFX_IRMS3,
     SFX_URMS1, SFX_URMS2, SFX_URMS3,
     SFX_SINSTS, SFX_SINSTS1, SFX_SINSTS2, SFX_SINSTS3,
@@ -228,27 +267,27 @@ static const TicEntry s_table[] = {
     { "ADSC",      300,   TY_U64, SFX_NONE,    false },
     // Tariff info
     { "NGTF",     2000,   TY_STR, SFX_NONE,    false },
-    { "LTARF",    2100,   TY_STR, SFX_NONE,    false },
-    { "NTARF",  0xFFFF,   TY_NONE, SFX_NONE,   false },
+    { "LTARF",    2100,   TY_STR, SFX_NTARF,    false },
+    { "NTARF",  0xFFFF,   TY_STR, SFX_NTARF,   false },
     { "VTIC",   0xFFFF,   TY_NONE, SFX_NONE,   false },
     // Date
     { "DATE",     3000,   TY_STR, SFX_NONE,    false },
     // Active energy — total and per-tariff index
     { "EAST",     1000,   TY_U64, SFX_EAST,    false },
-    { "EASF01",   1004,   TY_U64, SFX_NONE,    false },
-    { "EASF02",   1008,   TY_U64, SFX_NONE,    false },
-    { "EASF03",   1012,   TY_U64, SFX_NONE,    false },
-    { "EASF04",   1016,   TY_U64, SFX_NONE,    false },
-    { "EASF05",   1020,   TY_U64, SFX_NONE,    false },
-    { "EASF06",   1024,   TY_U64, SFX_NONE,    false },
-    { "EASF07",   1028,   TY_U64, SFX_NONE,    false },
-    { "EASF08",   1032,   TY_U64, SFX_NONE,    false },
-    { "EASF09",   1036,   TY_U64, SFX_NONE,    false },
-    { "EASF10",   1040,   TY_U64, SFX_NONE,    false },
-    { "EASD01",   1100,   TY_U64, SFX_NONE,    false },
-    { "EASD02",   1104,   TY_U64, SFX_NONE,    false },
-    { "EASD03",   1108,   TY_U64, SFX_NONE,    false },
-    { "EASD04",   1112,   TY_U64, SFX_NONE,    false },
+    { "EASF01",   1004,   TY_U64, SFX_EASF01,    false },
+    { "EASF02",   1008,   TY_U64, SFX_EASF02,    false },
+    { "EASF03",   1012,   TY_U64, SFX_EASF03,    false },
+    { "EASF04",   1016,   TY_U64, SFX_EASF04,    false },
+    { "EASF05",   1020,   TY_U64, SFX_EASF05,    false },
+    { "EASF06",   1024,   TY_U64, SFX_EASF06,    false },
+    { "EASF07",   1028,   TY_U64, SFX_EASF07,    false },
+    { "EASF08",   1032,   TY_U64, SFX_EASF08,    false },
+    { "EASF09",   1036,   TY_U64, SFX_EASF09,    false },
+    { "EASF10",   1040,   TY_U64, SFX_EASF10,    false },
+    { "EASD01",   1100,   TY_U64, SFX_EASD01,    false },
+    { "EASD02",   1104,   TY_U64, SFX_EASD02,    false },
+    { "EASD03",   1108,   TY_U64, SFX_EASD03,    false },
+    { "EASD04",   1112,   TY_U64, SFX_EASD04,    false },
     // Reactive / injected energy
     { "EAIT",     1200,   TY_U64, SFX_NONE,    false },
     { "ERQ1",     1300,   TY_U64, SFX_NONE,    false },
@@ -271,7 +310,7 @@ static const TicEntry s_table[] = {
     { "SINSTS3",  1337,   TY_U64, SFX_SINSTS3, false },
     { "SINSTS",   1341,   TY_U64, SFX_SINSTS,  false },
     // Contract / power limits
-    { "PREF",     1399,   TY_U16, SFX_NONE,    false },
+    { "PREF",     1399,   TY_U16, SFX_PREF,    false },
     { "PCOUP",    1398,   TY_U16, SFX_NONE,    false },
     // Status register
     { "STGE",     4000,   TY_STR, SFX_STGE,    false },
@@ -312,104 +351,104 @@ static const TicEntry s_table[] = {
 };
 
 static void dispatchSfx(TicSfx sfx, uint64_t v) {
+
+    static bool pf_initialized = false;
+    if (!pf_initialized) {
+        sdm630WriteFloat(SDM630_L1_POWER_FACTOR, 1.0f);
+        sdm630WriteFloat(SDM630_L2_POWER_FACTOR, 1.0f);
+        sdm630WriteFloat(SDM630_L3_POWER_FACTOR, 1.0f);
+        sdm630WriteFloat(SDM630_TOTAL_POWER_FACTOR, 1.0f);
+        pf_initialized = true;
+    }
+
     int32_t  v32  = (v > 0x7FFFFFFFull) ? 0x7FFFFFFF : (int32_t)v;
     uint32_t v32u = (v > 0xFFFFFFFFull) ? 0xFFFFFFFF : (uint32_t)v;
     uint16_t v16  = (uint16_t)v;
     switch (sfx) {
+
         case SFX_EAST:
+            sdm630WriteFloat(SDM630_TOTAL_ACTIVE_ENERGY, (float)v / 1000.0f);
             standardEnergyUpdate(v);
             break;
-        case SFX_IRMS1:
-            seWriteInt32(SE_IRMS1_REG, (int32_t)v16 * 1000);
+        case SFX_PREF:
+            sdm630WriteFloat(SDM630_CONTRACTED_POWER, (float)v16);
             break;
-        case SFX_IRMS2:
-            seWriteInt32(SE_IRMS2_REG, (int32_t)v16 * 1000);
+        case SFX_EASF01:
+            s_easf01 = (float)v / 1000.0f;
+            sdm630WriteFloat(SDM630_BLUE_HC_KWH, s_easf01);
+            sdm630WriteFloat(SDM630_TEMPO_BLUE_KWH, s_easf01 + s_easf02);
             break;
-        case SFX_IRMS3:
-            seWriteInt32(SE_IRMS3_REG, (int32_t)v16 * 1000);
+        case SFX_EASF02:
+            s_easf02 = (float)v / 1000.0f;
+            sdm630WriteFloat(SDM630_BLUE_HP_KWH, s_easf02);
+            sdm630WriteFloat(SDM630_TEMPO_BLUE_KWH, s_easf01 + s_easf02);
             break;
+        case SFX_EASF03:
+            s_easf03 = (float)v / 1000.0f;
+            sdm630WriteFloat(SDM630_WHITE_HC_KWH, s_easf03);
+            sdm630WriteFloat(SDM630_TEMPO_WHITE_KWH, s_easf03 + s_easf04);
+            break;
+        case SFX_EASF04:
+            s_easf04 = (float)v / 1000.0f;
+            sdm630WriteFloat(SDM630_WHITE_HP_KWH, s_easf04);
+            sdm630WriteFloat(SDM630_TEMPO_WHITE_KWH, s_easf03 + s_easf04);
+            break;
+        case SFX_EASF05:
+            s_easf05 = (float)v / 1000.0f;
+            sdm630WriteFloat(SDM630_RED_HC_KWH, s_easf05);
+            sdm630WriteFloat(SDM630_TEMPO_RED_KWH, s_easf05 + s_easf06);
+            break;
+        case SFX_EASF06:
+            s_easf06 = (float)v / 1000.0f;
+            sdm630WriteFloat(SDM630_RED_HP_KWH, s_easf06);
+            sdm630WriteFloat(SDM630_TEMPO_RED_KWH, s_easf05 + s_easf06);
+            break;
+        case SFX_EASD01: s_easd01 = (float)v / 1000.0f; sdm630WriteFloat(SDM630_TOTAL_HC_KWH, s_easd01); break;
+        case SFX_EASD02: s_easd02 = (float)v / 1000.0f; sdm630WriteFloat(SDM630_TOTAL_HP_KWH, s_easd02); break;
+        case SFX_EASD03: s_easd03 = (float)v / 1000.0f; break;
+        case SFX_EASD04: s_easd04 = (float)v / 1000.0f; break;
+        case SFX_IRMS1: break;
+        case SFX_IRMS2: break;
+        case SFX_IRMS3: break;
         case SFX_URMS1:
-            seWriteInt32(SE_URMS1_REG, (int32_t)v16 * 10);
             s_urms1_v = v16;
-            seUpdatePreciseCurrent();
-            seUpdatePreciseCurrentL1();
             sdm630WriteFloat(SDM630_L1_VOLTAGE, (float)v16);
             break;
         case SFX_URMS2:
-            seWriteInt32(SE_URMS2_REG, (int32_t)v16 * 10);
             s_urms2_v = v16;
             s_urms2_set = true;
-            seUpdatePreciseCurrentL2();
             sdm630WriteFloat(SDM630_L2_VOLTAGE, (float)v16);
             break;
         case SFX_URMS3:
-            seWriteInt32(SE_URMS3_REG, (int32_t)v16 * 10);
             s_urms3_v = v16;
             s_urms3_set = true;
-            seUpdatePreciseCurrentL3();
             sdm630WriteFloat(SDM630_L3_VOLTAGE, (float)v16);
             break;
         case SFX_SINSTS:
-            seWriteInt32(SE_PAPP_REG, v32);
             s_sinsts_va = v32u;
-            seUpdatePreciseCurrent();
-            seUpdatePreciseCurrentL1();  // refresh SDM630 L1 current (single-phase fallback)
-            seUpdateCosPhi();
             sdm630WriteFloat(SDM630_TOTAL_APPARENT_VA, (float)v32u);
             break;
         case SFX_SINSTS1:
-            seWriteInt32(SE_PAPP1_REG, v32);
             s_sinsts1_va = v32u;
-            seUpdatePreciseCurrentL1();
             sdm630WriteFloat(SDM630_L1_APPARENT_POWER, (float)v32u);
             break;
         case SFX_SINSTS2:
-            seWriteInt32(SE_PAPP2_REG, v32);
             s_sinsts2_va = v32u;
-            seUpdatePreciseCurrentL2();
             sdm630WriteFloat(SDM630_L2_APPARENT_POWER, (float)v32u);
             break;
         case SFX_SINSTS3:
-            seWriteInt32(SE_PAPP3_REG, v32);
             s_sinsts3_va = v32u;
-            seUpdatePreciseCurrentL3();
             sdm630WriteFloat(SDM630_L3_APPARENT_POWER, (float)v32u);
             break;
         case SFX_CCASN:
             s_ccasn_w = v32u;
-            seUpdateCosPhi();
             break;
         case SFX_STGE: {
-            uint32_t stge = (uint32_t)v;
-            holdingRegisters[SE_STGE_INJECT_REG]   = (stge >> 4) & 1u;
-            holdingRegisters[SE_STGE_OVERLOAD_REG] = (stge >> 6) & 1u;
-            holdingRegisters[SE_STGE_PRODUCER_REG] = (stge >> 7) & 1u;
-            break;
+            extern void updatePowerOverflow(bool overflow);
+            updatePowerOverflow((v32u >> 7) & 1u);
         }
-        default:
-            break;
+        break;
     }
-}
-
-// ── Spec-file cache ───────────────────────────────────────────────────────────
-// /modbus/registres_spec.json is loaded once on first unknown label and kept in
-// heap. The web UI always reboots after saving the file, so the cache is valid
-// for the lifetime of the process.
-
-static DynamicJsonDocument *s_spec_doc   = nullptr;
-static bool                 s_spec_tried = false;
-
-static void ensureSpecDoc() {
-    if (s_spec_tried) return;
-    s_spec_tried = true;
-    File f = LittleFS.open("/modbus/registres_spec.json", FILE_READ);
-    if (!f || f.isDirectory()) { f.close(); return; }
-    s_spec_doc = new DynamicJsonDocument(100000);
-    if (deserializeJson(*s_spec_doc, f) != DeserializationError::Ok) {
-        delete s_spec_doc;
-        s_spec_doc = nullptr;
-    }
-    f.close();
 }
 
 // ── Data processor ────────────────────────────────────────────────────────────
@@ -424,18 +463,39 @@ bool bDataProcessingStandard(char *au8Command, char *au8Value, uint8_t au8Pos) {
         switch (e.type) {
             case TY_U64:
                 v64 = (uint64_t)strtoull(au8Value, NULL, 10);
-                if (e.reg != 0xFFFF) writeU64BE(e.reg, v64);
+
                 dispatchSfx(e.sfx, v64);
                 break;
             case TY_U16: {
                 uint16_t v16 = (uint16_t)atoi(au8Value);
-                holdingRegisters[e.reg] = v16;
+
                 dispatchSfx(e.sfx, (uint64_t)v16);
                 break;
             }
-            case TY_STR:
-                if (e.reg != 0xFFFF) writeStr(e.reg, au8Value);
-                if (e.sfx != SFX_NONE) {
+                        case TY_STR:
+                if (e.sfx == SFX_NTARF) {
+                    sdm630WriteFloat(SDM630_IS_TEMPO_BLUE, 0.0f);
+                    sdm630WriteFloat(SDM630_IS_TEMPO_WHITE, 0.0f);
+                    sdm630WriteFloat(SDM630_IS_TEMPO_RED, 0.0f);
+                    sdm630WriteFloat(SDM630_IS_HP, 0.0f);
+                    sdm630WriteFloat(SDM630_IS_HC, 0.0f);
+                    sdm630WriteFloat(SDM630_IS_BASE_TARIFF, 0.0f);
+                    sdm630WriteFloat(SDM630_IS_HPHC_TARIFF, 0.0f);
+                    sdm630WriteFloat(SDM630_IS_TEMPO_TARIFF, 0.0f);
+
+                    String t = String(au8Value);
+                    t.toUpperCase();
+
+                    if (t.indexOf("BLEU") >= 0) { sdm630WriteFloat(SDM630_IS_TEMPO_BLUE, 1.0f); sdm630WriteFloat(SDM630_IS_TEMPO_TARIFF, 1.0f); }
+                    if (t.indexOf("BLANC") >= 0) { sdm630WriteFloat(SDM630_IS_TEMPO_WHITE, 1.0f); sdm630WriteFloat(SDM630_IS_TEMPO_TARIFF, 1.0f); }
+                    if (t.indexOf("ROUGE") >= 0) { sdm630WriteFloat(SDM630_IS_TEMPO_RED, 1.0f); sdm630WriteFloat(SDM630_IS_TEMPO_TARIFF, 1.0f); }
+                    if (t.indexOf("HP") >= 0) { sdm630WriteFloat(SDM630_IS_HP, 1.0f); sdm630WriteFloat(SDM630_IS_HPHC_TARIFF, 1.0f); }
+                    if (t.indexOf("HC") >= 0) { sdm630WriteFloat(SDM630_IS_HC, 1.0f); sdm630WriteFloat(SDM630_IS_HPHC_TARIFF, 1.0f); }
+                    if (t.indexOf("BASE") >= 0) { sdm630WriteFloat(SDM630_IS_BASE_TARIFF, 1.0f); }
+                } else if (e.sfx == SFX_STGE) {
+                    uint32_t stge = strtoul(au8Value, NULL, 16);
+                    dispatchSfx(e.sfx, stge);
+                } else if (e.sfx != SFX_NONE) {
                     uint64_t hv = (uint64_t)strtoull(au8Value, NULL, 16);
                     dispatchSfx(e.sfx, hv);
                 }
@@ -454,28 +514,6 @@ bool bDataProcessingStandard(char *au8Command, char *au8Value, uint8_t au8Pos) {
         return true;
     }
 
-    // Fallback: user-defined register spec (loaded once from /modbus/registres_spec.json)
-    ensureSpecDoc();
-    if (!s_spec_doc) return true;
-
-    if (s_spec_doc->containsKey("standard")) {
-        for (JsonVariant entry : (*s_spec_doc)["standard"].as<JsonArray>()) {
-            const char *cmd = entry["command"].as<const char *>();
-            if (!cmd || strcmp(au8Command, cmd) != 0) continue;
-            int         size = entry["size"].as<int>();
-            int         reg  = entry["reg"].as<int>();
-            const char *type = entry["type"].as<const char *>();
-            if (type && memcmp(type, "numeric", 7) == 0) {
-                long long tmp = strtoull(au8Value, NULL, 10);
-                for (int j = 0; j < size; j++)
-                    holdingRegisters[reg + j] = (uint16_t)(tmp >> ((size - 1 - j) * 16)) & 0xFFFF;
-            } else if (type && memcmp(type, "string", 6) == 0) {
-                for (int j = 0; j < size; j++)
-                    holdingRegisters[reg + j] = static_cast<uint16_t>(au8Value[j]);
-            }
-            break;
-        }
-    }
     return true;
 }
 
