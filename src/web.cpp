@@ -22,7 +22,7 @@
 
 extern struct ConfigSettingsStruct ConfigSettings;
 extern uint16_t wifi_modbus_reg_666;
-extern uint16_t sdm630InputRegisters[622];
+extern uint16_t sdm630InputRegisters[631];
 
 
 HTTPClient clientWeb;
@@ -480,6 +480,13 @@ void handleStatusNetwork(AsyncWebServerRequest *request)
     float f; memcpy(&f, &bits, 4);
     response->printf("<tr><td><strong>%s</strong></td><td>%.2f %s</td></tr>", lbl, (double)f, unit);
   };
+  // Helper for single uint16 registers
+  auto sdm630U16 = [&](const char* lbl, uint16_t reg, const char* unit) {
+    response->printf("<tr><td><strong>%s</strong></td><td>%u %s</td></tr>", lbl, (unsigned)sdm630InputRegisters[reg], unit);
+  };
+  auto sdm630BoolU16 = [&](const char* lbl, uint16_t reg) {
+    response->printf("<tr><td><strong>%s</strong></td><td>%s</td></tr>", lbl, sdm630InputRegisters[reg] ? "true" : "false");
+  };
   // Helper for boolean registers
   auto sdm630Bool = [&](const char* lbl, uint16_t base) {
     uint32_t bits = ((uint32_t)sdm630InputRegisters[base] << 16) | sdm630InputRegisters[base + 1];
@@ -537,6 +544,14 @@ void handleStatusNetwork(AsyncWebServerRequest *request)
   sdm630F("616-617 Apparent Power (mv avg) :", 616, "VA");
   sdm630F("618-619 Current L1 (mv avg) :", 618, "A");
   sdm630F("620-621 Voltage L1 (mv avg) :", 620, "V");
+  sdm630F("622-623 CCASN Active Power (10min avg) :", 622, "W");
+  sdm630U16("624 Date Year :", 624, "");
+  sdm630U16("625 Date Month :", 625, "");
+  sdm630U16("626 Date Day :", 626, "");
+  sdm630U16("627 Date Hour :", 627, "");
+  sdm630U16("628 Date Minute :", 628, "");
+  sdm630U16("629 Date Second :", 629, "");
+  sdm630BoolU16("630 Is Summer (E=true, H=false) :", 630);
 
   // TIC Modbus Mapping
   response->print(F("</table></div></div></div>"));

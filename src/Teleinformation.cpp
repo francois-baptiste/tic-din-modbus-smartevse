@@ -67,6 +67,15 @@ extern ConfigSettingsStruct ConfigSettings;
 #define SDM630_APPARENT_POWER_VA_MVAVG   616
 #define SDM630_CURRENT_L1_A_MVAVG        618
 #define SDM630_VOLTAGE_L1_V_MVAVG        620
+#define SDM630_CCASN_W                   622
+
+#define SDM630_DATE_YEAR      624
+#define SDM630_DATE_MONTH     625
+#define SDM630_DATE_DAY       626
+#define SDM630_DATE_HOUR      627
+#define SDM630_DATE_MINUTE    628
+#define SDM630_DATE_SECOND    629
+#define SDM630_DATE_IS_SUMMER 630
 
 static void sdm630WriteFloat(uint16_t reg, float value) {
     uint32_t bits;
@@ -119,10 +128,11 @@ static float s_easd02 = 0;
 static float s_easd03 = 0;
 static float s_easd04 = 0;
 
-// Compute current from Active Power / Voltage (assuming PF=1 for higher precision)
+// Compute current from instantaneous apparent power (SINSTS) / voltage
 static void updateComputedCurrentL1() {
-    if (s_urms1_v > 0 && s_ccasn_w > 0) {
-        float current = (float)s_ccasn_w / (float)s_urms1_v;
+    uint32_t sinsts = s_sinsts1_set ? s_sinsts1_va : s_sinsts_va;
+    if (s_urms1_v > 0 && sinsts > 0) {
+        float current = (float)sinsts / (float)s_urms1_v;
         sdm630WriteFloat(SDM630_L1_CURRENT, current);
     }
 }
@@ -234,6 +244,7 @@ static void applyEnergyDelta(uint64_t delta_wh, uint32_t now_ms) {
         s_power_ema_w = P_raw;
     else
         s_power_ema_w = alpha * P_raw + (1.0f - alpha) * s_power_ema_w;
+    sdm630WriteFloat(SDM630_TOTAL_ACTIVE_POWER, s_power_ema_w);
 }
 
 static void standardEnergyUpdate(uint64_t wh) {
@@ -271,6 +282,7 @@ enum TicSfx  : uint8_t {
     SFX_SINSTS, SFX_SINSTS1, SFX_SINSTS2, SFX_SINSTS3,
     SFX_CCASN,
     SFX_STGE,
+    SFX_DATE,
 };
 
 struct TicEntry {
@@ -291,7 +303,7 @@ static const TicEntry s_table[] = {
     { "NTARF",  0xFFFF,   TY_STR, SFX_NTARF,   false },
     { "VTIC",   0xFFFF,   TY_NONE, SFX_NONE,   false },
     // Date
-    { "DATE",     3000,   TY_STR, SFX_NONE,    false },
+    { "DATE",     3000,   TY_STR, SFX_DATE,    false },
     // Active energy — total and per-tariff index
     { "EAST",     1000,   TY_U64, SFX_EAST,    false },
     { "EASF01",   1004,   TY_U64, SFX_EASF01,    false },
@@ -433,7 +445,7 @@ static void dispatchSfx(TicSfx sfx, uint64_t v) {
         case SFX_URMS1:
             s_urms1_v = v16;
             sdm630WriteFloat(SDM630_L1_VOLTAGE, (float)v16);
-            updateComputedCurrentL1();
+            updateComputedCurrentL1(); // recompute current when voltage changes
             break;
         case SFX_URMS2:
             s_urms2_v = v16;
@@ -448,11 +460,13 @@ static void dispatchSfx(TicSfx sfx, uint64_t v) {
         case SFX_SINSTS:
             s_sinsts_va = v32u;
             sdm630WriteFloat(SDM630_TOTAL_APPARENT_VA, (float)v32u);
+            if (!s_sinsts1_set) updateComputedCurrentL1();
             break;
         case SFX_SINSTS1:
             s_sinsts1_va = v32u;
             s_sinsts1_set = true;
             sdm630WriteFloat(SDM630_L1_APPARENT_POWER, (float)v32u);
+            updateComputedCurrentL1();
             break;
         case SFX_SINSTS2:
             s_sinsts2_va = v32u;
@@ -465,7 +479,7 @@ static void dispatchSfx(TicSfx sfx, uint64_t v) {
         case SFX_CCASN:
             s_ccasn_w = v32u;
             sdm630WriteFloat(SDM630_L1_ACTIVE_POWER, (float)v32u);
-            updateComputedCurrentL1();
+            sdm630WriteFloat(SDM630_CCASN_W, (float)v32u);
             break;
         case SFX_STGE: {
             extern void updatePowerOverflow(bool overflow);
@@ -519,6 +533,18 @@ bool bDataProcessingStandard(char *au8Command, char *au8Value, uint8_t au8Pos) {
                 } else if (e.sfx == SFX_STGE) {
                     uint32_t stge = strtoul(au8Value, NULL, 16);
                     dispatchSfx(e.sfx, stge);
+                } else if (e.sfx == SFX_DATE) {
+                    // Format: SAAMMJJhhmmss (S=season E/H, then 2-digit year/month/day/hour/min/sec)
+                    if (strlen(au8Value) >= 13) {
+                        auto d2 = [](const char *p) -> uint16_t { return (p[0]-'0')*10 + (p[1]-'0'); };
+                        sdm630InputRegisters[SDM630_DATE_YEAR]      = 2000 + d2(au8Value + 1);
+                        sdm630InputRegisters[SDM630_DATE_MONTH]     = d2(au8Value + 3);
+                        sdm630InputRegisters[SDM630_DATE_DAY]       = d2(au8Value + 5);
+                        sdm630InputRegisters[SDM630_DATE_HOUR]      = d2(au8Value + 7);
+                        sdm630InputRegisters[SDM630_DATE_MINUTE]    = d2(au8Value + 9);
+                        sdm630InputRegisters[SDM630_DATE_SECOND]    = d2(au8Value + 11);
+                        sdm630InputRegisters[SDM630_DATE_IS_SUMMER] = (au8Value[0] == 'E') ? 1 : 0;
+                    }
                 } else if (e.sfx != SFX_NONE) {
                     uint64_t hv = (uint64_t)strtoull(au8Value, NULL, 16);
                     dispatchSfx(e.sfx, hv);

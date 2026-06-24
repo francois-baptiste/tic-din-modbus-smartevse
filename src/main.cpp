@@ -28,7 +28,7 @@ String modeWiFi = "STA";
 
 TimerHandle_t WifiReconnectTimer;
 
-uint16_t sdm630InputRegisters[622];   // FC=04 — Eastron SDM630 register layout
+uint16_t sdm630InputRegisters[631];   // FC=04 — Eastron SDM630 register layout
 ModbusRTUSlave modbus(Serial1, 5);
 
 uint32_t u32Timeout = 0;
@@ -370,7 +370,7 @@ void setup() {
         modbusSerialConfig = SERIAL_8E1;
     else if (strcmp(ConfigSettings.modbus_parity, "Odd") == 0)
         modbusSerialConfig = SERIAL_8O1;
-    modbus.configureInputRegisters(sdm630InputRegisters, 622);
+    modbus.configureInputRegisters(sdm630InputRegisters, 631);
     modbus.begin(ConfigSettings.modbus_id, atoi(ConfigSettings.modbus_bauds), modbusSerialConfig);
 
     loadConfigHTTP();
