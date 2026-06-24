@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <LittleFS.h>
+#include "driver/temp_sensor.h"
 #include "Teleinformation.h"
 #include "config.h"
 
@@ -104,6 +105,7 @@ static uint16_t s_urms2_v    = 230;
 static uint16_t s_urms3_v    = 230;
 static bool     s_urms2_set  = false;
 static bool     s_urms3_set  = false;
+static bool     s_sinsts1_set = false;  // Track if SINSTS1 is received from Linky
 static uint32_t s_ccasn_w    = 0;
 
 static float s_easf01 = 0;
@@ -187,6 +189,16 @@ void processMovingAverages() {
         sdm630WriteFloat(SDM630_VOLTAGE_L1_V_MVAVG, avg_volt);
 
         sdm630InputRegisters[SDM630_IS_POWER_OVERFLOW] = any_overflow ? 1 : 0;
+
+        // Fallback: if SINSTS1 not received from Linky, use SINSTS (single-phase)
+        if (!s_sinsts1_set && s_sinsts_va > 0) {
+            sdm630WriteFloat(SDM630_L1_APPARENT_POWER, (float)s_sinsts_va);
+        }
+
+        // Update temperature register
+        float temp;
+        temp_sensor_read_celsius(&temp);
+        sdm630WriteFloat(SDM630_TEMPERATURE, temp);
     }
 }
 
@@ -439,6 +451,7 @@ static void dispatchSfx(TicSfx sfx, uint64_t v) {
             break;
         case SFX_SINSTS1:
             s_sinsts1_va = v32u;
+            s_sinsts1_set = true;
             sdm630WriteFloat(SDM630_L1_APPARENT_POWER, (float)v32u);
             break;
         case SFX_SINSTS2:
