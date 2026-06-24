@@ -12,7 +12,7 @@ static uint8_t      s_crc_rx   = 0;   // last received byte when pos≥2 (become
 static uint8_t      s_crc_acc  = 0;   // running sum: label+TAB+horodate+TAB+value+TAB
 static uint8_t      s_crc_snap = 0;   // snapshot of s_crc_acc at the separator after value
 
-extern uint16_t             sdm630InputRegisters[622];
+extern uint16_t             sdm630InputRegisters[631];
 extern uint32_t             u32Timeout;
 extern uint8_t              u8ErrorDecode;
 extern ConfigSettingsStruct ConfigSettings;
@@ -329,7 +329,7 @@ static const TicEntry s_table[] = {
     // Tariff info
     { "NGTF",     2000,   TY_STR, SFX_NONE,    false },
     { "LTARF",    2100,   TY_STR, SFX_NTARF,    false },
-    { "NTARF",  0xFFFF,   TY_STR, SFX_NTARF,   false },
+    { "NTARF",  0xFFFF,   TY_NONE, SFX_NONE,   false },
     { "VTIC",   0xFFFF,   TY_NONE, SFX_NONE,   false },
     // Date
     { "DATE",     3000,   TY_STR, SFX_DATE,    false },
@@ -547,24 +547,24 @@ bool bDataProcessingStandard(char *au8Command, char *au8Value, uint8_t au8Pos) {
             }
                         case TY_STR:
                 if (e.sfx == SFX_NTARF) {
-                    sdm630WriteFloat(SDM630_IS_TEMPO_BLUE, 0.0f);
-                    sdm630WriteFloat(SDM630_IS_TEMPO_WHITE, 0.0f);
-                    sdm630WriteFloat(SDM630_IS_TEMPO_RED, 0.0f);
-                    sdm630WriteFloat(SDM630_IS_HP, 0.0f);
-                    sdm630WriteFloat(SDM630_IS_HC, 0.0f);
-                    sdm630WriteFloat(SDM630_IS_BASE_TARIFF, 0.0f);
-                    sdm630WriteFloat(SDM630_IS_HPHC_TARIFF, 0.0f);
-                    sdm630WriteFloat(SDM630_IS_TEMPO_TARIFF, 0.0f);
+                    sdm630InputRegisters[SDM630_IS_TEMPO_BLUE]   = 0;
+                    sdm630InputRegisters[SDM630_IS_TEMPO_WHITE]  = 0;
+                    sdm630InputRegisters[SDM630_IS_TEMPO_RED]    = 0;
+                    sdm630InputRegisters[SDM630_IS_HP]           = 0;
+                    sdm630InputRegisters[SDM630_IS_HC]           = 0;
+                    sdm630InputRegisters[SDM630_IS_BASE_TARIFF]  = 0;
+                    sdm630InputRegisters[SDM630_IS_HPHC_TARIFF]  = 0;
+                    sdm630InputRegisters[SDM630_IS_TEMPO_TARIFF] = 0;
 
                     String t = String(au8Value);
                     t.toUpperCase();
 
-                    if (t.indexOf("BLEU") >= 0) { sdm630WriteFloat(SDM630_IS_TEMPO_BLUE, 1.0f); sdm630WriteFloat(SDM630_IS_TEMPO_TARIFF, 1.0f); }
-                    if (t.indexOf("BLANC") >= 0) { sdm630WriteFloat(SDM630_IS_TEMPO_WHITE, 1.0f); sdm630WriteFloat(SDM630_IS_TEMPO_TARIFF, 1.0f); }
-                    if (t.indexOf("ROUGE") >= 0) { sdm630WriteFloat(SDM630_IS_TEMPO_RED, 1.0f); sdm630WriteFloat(SDM630_IS_TEMPO_TARIFF, 1.0f); }
-                    if (t.indexOf("HP") >= 0) { sdm630WriteFloat(SDM630_IS_HP, 1.0f); sdm630WriteFloat(SDM630_IS_HPHC_TARIFF, 1.0f); }
-                    if (t.indexOf("HC") >= 0) { sdm630WriteFloat(SDM630_IS_HC, 1.0f); sdm630WriteFloat(SDM630_IS_HPHC_TARIFF, 1.0f); }
-                    if (t.indexOf("BASE") >= 0) { sdm630WriteFloat(SDM630_IS_BASE_TARIFF, 1.0f); }
+                    if (t.indexOf("BLEU") >= 0)  { sdm630InputRegisters[SDM630_IS_TEMPO_BLUE]   = 1; sdm630InputRegisters[SDM630_IS_TEMPO_TARIFF] = 1; }
+                    if (t.indexOf("BLANC") >= 0) { sdm630InputRegisters[SDM630_IS_TEMPO_WHITE]  = 1; sdm630InputRegisters[SDM630_IS_TEMPO_TARIFF] = 1; }
+                    if (t.indexOf("ROUGE") >= 0) { sdm630InputRegisters[SDM630_IS_TEMPO_RED]    = 1; sdm630InputRegisters[SDM630_IS_TEMPO_TARIFF] = 1; }
+                    if (t.indexOf("HP") >= 0)    { sdm630InputRegisters[SDM630_IS_HP]           = 1; sdm630InputRegisters[SDM630_IS_HPHC_TARIFF]  = 1; }
+                    if (t.indexOf("HC") >= 0)    { sdm630InputRegisters[SDM630_IS_HC]           = 1; sdm630InputRegisters[SDM630_IS_HPHC_TARIFF]  = 1; }
+                    if (t.indexOf("BASE") >= 0)  { sdm630InputRegisters[SDM630_IS_BASE_TARIFF]  = 1; }
                 } else if (e.sfx == SFX_STGE) {
                     uint32_t stge = strtoul(au8Value, NULL, 16);
                     dispatchSfx(e.sfx, stge);
