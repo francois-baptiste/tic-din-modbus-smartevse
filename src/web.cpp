@@ -480,6 +480,13 @@ void handleStatusNetwork(AsyncWebServerRequest *request)
     float f; memcpy(&f, &bits, 4);
     response->printf("<tr><td><strong>%s</strong></td><td>%.2f %s</td></tr>", lbl, (double)f, unit);
   };
+  // Helper for boolean registers
+  auto sdm630Bool = [&](const char* lbl, uint16_t base) {
+    uint32_t bits = ((uint32_t)sdm630InputRegisters[base] << 16) | sdm630InputRegisters[base + 1];
+    float f; memcpy(&f, &bits, 4);
+    bool b = (f >= 0.5f);
+    response->printf("<tr><td><strong>%s</strong></td><td>%s</td></tr>", lbl, b ? "true" : "false");
+  };
   sdm630F("0-1 Voltage L1 :",   0,  "V");
   sdm630F("2-3 Voltage L2 :",   2,  "V");
   sdm630F("4-5 Voltage L3 :",   4,  "V");
@@ -514,15 +521,15 @@ void handleStatusNetwork(AsyncWebServerRequest *request)
   sdm630F("518-519 Red HC :", 518, "kWh");
   sdm630F("520-521 Red HP :", 520, "kWh");
 
-  sdm630F("600-601 Is Tempo Blue :", 600, "");
-  sdm630F("601-602 Is Tempo White :", 601, "");
-  sdm630F("602-603 Is Tempo Red :", 602, "");
-  sdm630F("603-604 Is HP :", 603, "");
-  sdm630F("604-605 Is HC :", 604, "");
-  sdm630F("605-606 Is Base Tariff :", 605, "");
-  sdm630F("606-607 Is HPHC Tariff :", 606, "");
-  sdm630F("607-608 Is Tempo Tariff :", 607, "");
-  sdm630F("608-609 Is Power Overflow :", 608, "");
+  sdm630Bool("600-601 Is Tempo Blue :", 600);
+  sdm630Bool("601-602 Is Tempo White :", 601);
+  sdm630Bool("602-603 Is Tempo Red :", 602);
+  sdm630Bool("603-604 Is HP :", 603);
+  sdm630Bool("604-605 Is HC :", 604);
+  sdm630Bool("605-606 Is Base Tariff :", 605);
+  sdm630Bool("606-607 Is HPHC Tariff :", 606);
+  sdm630Bool("607-608 Is Tempo Tariff :", 607);
+  sdm630Bool("608-609 Is Power Overflow :", 608);
   sdm630F("609-610 Contracted Power :", 609, "kVA");
   sdm630F("612-613 Temperature :", 612, "&deg;C");
 
