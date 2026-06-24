@@ -434,8 +434,6 @@ void loop() {
         u32Timeout    = 0;
     }
 
-    processMovingAverages();
-
     delay(10);
     u32Timeout++;
 }
