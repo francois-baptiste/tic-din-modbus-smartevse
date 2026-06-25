@@ -149,7 +149,6 @@ static void updateComputedCurrentL1() {
 }
 
 // ── Moving Average & Latch Logic (10s window, updated every 2s) ──
-static float mv_active_power[5] = {0};
 static float mv_apparent_power[5] = {0};
 static float mv_current_l1[5] = {0};
 static float mv_voltage_l1[5] = {0};
@@ -168,11 +167,8 @@ void processMovingAverages() {
 
         mv_idx = (mv_idx + 1) % 5;
 
-        float f_active_power, f_apparent_power, f_current_l1, f_voltage_l1;
+        float f_apparent_power, f_current_l1, f_voltage_l1;
         uint32_t bits;
-
-        bits = ((uint32_t)sdm630InputRegisters[SDM630_TOTAL_ACTIVE_POWER] << 16) | sdm630InputRegisters[SDM630_TOTAL_ACTIVE_POWER + 1];
-        memcpy(&f_active_power, &bits, 4);
 
         bits = ((uint32_t)sdm630InputRegisters[SDM630_TOTAL_APPARENT_VA] << 16) | sdm630InputRegisters[SDM630_TOTAL_APPARENT_VA + 1];
         memcpy(&f_apparent_power, &bits, 4);
@@ -183,28 +179,24 @@ void processMovingAverages() {
         bits = ((uint32_t)sdm630InputRegisters[SDM630_L1_VOLTAGE] << 16) | sdm630InputRegisters[SDM630_L1_VOLTAGE + 1];
         memcpy(&f_voltage_l1, &bits, 4);
 
-        mv_active_power[mv_idx] = f_active_power;
         mv_apparent_power[mv_idx] = f_apparent_power;
         mv_current_l1[mv_idx] = f_current_l1;
         mv_voltage_l1[mv_idx] = f_voltage_l1;
 
         mv_power_overflow[mv_idx] = false;
 
-        float avg_active = 0, avg_apparent = 0, avg_curr = 0, avg_volt = 0;
+        float avg_apparent = 0, avg_curr = 0, avg_volt = 0;
         bool any_overflow = false;
         for (int i = 0; i < 5; i++) {
-            avg_active += mv_active_power[i];
             avg_apparent += mv_apparent_power[i];
             avg_curr += mv_current_l1[i];
             avg_volt += mv_voltage_l1[i];
             if (mv_power_overflow[i]) any_overflow = true;
         }
-        avg_active /= 5.0f;
         avg_apparent /= 5.0f;
         avg_curr /= 5.0f;
         avg_volt /= 5.0f;
 
-        sdm630WriteFloat(SDM630_ACTIVE_POWER_W_MVAVG, avg_active);
         sdm630WriteFloat(SDM630_APPARENT_POWER_VA_MVAVG, avg_apparent);
         sdm630WriteFloat(SDM630_CURRENT_L1_A_MVAVG, avg_curr);
         sdm630WriteFloat(SDM630_VOLTAGE_L1_V_MVAVG, avg_volt);
@@ -242,6 +234,7 @@ static void updateComputedActivePower() {
     float pf = (apparent > 0.0f) ? (active / apparent) : 1.0f;
 
     sdm630WriteFloat(SDM630_TOTAL_ACTIVE_POWER, active);
+    sdm630WriteFloat(SDM630_ACTIVE_POWER_W_MVAVG, active);
     sdm630WriteFloat(SDM630_TOTAL_POWER_FACTOR, pf);
 
     if (s_sinsts1_set) {
