@@ -50,15 +50,21 @@ extern ConfigSettingsStruct ConfigSettings;
 #define SDM630_RED_HC_KWH           518
 #define SDM630_RED_HP_KWH           520
 
-#define SDM630_IS_TEMPO_BLUE        600
-#define SDM630_IS_TEMPO_WHITE       601
-#define SDM630_IS_TEMPO_RED         602
-#define SDM630_IS_HP                603
-#define SDM630_IS_HC                604
-#define SDM630_IS_BASE_TARIFF       605
-#define SDM630_IS_HPHC_TARIFF       606
-#define SDM630_IS_TEMPO_TARIFF      607
-#define SDM630_IS_POWER_OVERFLOW    608
+// Decoded status flags packed into a single uint16 bitmask (decode with the
+// FLAG_* masks below). Replaces the former one-register-per-flag layout that
+// occupied regs 600-608 and 630 — read register 600 once and apply the masks.
+#define SDM630_STATUS_FLAGS         600
+
+#define FLAG_TEMPO_BLUE     (1u << 0)
+#define FLAG_TEMPO_WHITE    (1u << 1)
+#define FLAG_TEMPO_RED      (1u << 2)
+#define FLAG_HP             (1u << 3)
+#define FLAG_HC             (1u << 4)
+#define FLAG_BASE_TARIFF    (1u << 5)
+#define FLAG_HPHC_TARIFF    (1u << 6)
+#define FLAG_TEMPO_TARIFF   (1u << 7)
+#define FLAG_POWER_OVERFLOW (1u << 8)
+#define FLAG_IS_SUMMER      (1u << 9)
 
 #define SDM630_CONTRACTED_POWER     609
 #define SDM630_TEMPERATURE          612
@@ -75,13 +81,19 @@ extern ConfigSettingsStruct ConfigSettings;
 #define SDM630_DATE_HOUR      627
 #define SDM630_DATE_MINUTE    628
 #define SDM630_DATE_SECOND    629
-#define SDM630_DATE_IS_SUMMER 630
+// is-summer flag moved into SDM630_STATUS_FLAGS (FLAG_IS_SUMMER); reg 630 freed
 
 static void sdm630WriteFloat(uint16_t reg, float value) {
     uint32_t bits;
     memcpy(&bits, &value, 4);
     sdm630InputRegisters[reg]     = (uint16_t)(bits >> 16);
     sdm630InputRegisters[reg + 1] = (uint16_t)(bits & 0xFFFF);
+}
+
+// Set/clear one or more bits in the packed status-flags register.
+static inline void sdm630SetFlag(uint16_t mask, bool on) {
+    if (on) sdm630InputRegisters[SDM630_STATUS_FLAGS] |=  mask;
+    else    sdm630InputRegisters[SDM630_STATUS_FLAGS] &= ~mask;
 }
 
 
@@ -198,7 +210,7 @@ void processMovingAverages() {
         sdm630WriteFloat(SDM630_CURRENT_L1_A_MVAVG, avg_curr);
         sdm630WriteFloat(SDM630_VOLTAGE_L1_V_MVAVG, avg_volt);
 
-        sdm630InputRegisters[SDM630_IS_POWER_OVERFLOW] = any_overflow ? 1 : 0;
+        sdm630SetFlag(FLAG_POWER_OVERFLOW, any_overflow);
 
         // Fallback: if SINSTS1 not received from Linky, use SINSTS (single-phase)
         if (!s_sinsts1_set && s_sinsts_va > 0) {
@@ -547,24 +559,20 @@ bool bDataProcessingStandard(char *au8Command, char *au8Value, uint8_t au8Pos) {
             }
                         case TY_STR:
                 if (e.sfx == SFX_NTARF) {
-                    sdm630InputRegisters[SDM630_IS_TEMPO_BLUE]   = 0;
-                    sdm630InputRegisters[SDM630_IS_TEMPO_WHITE]  = 0;
-                    sdm630InputRegisters[SDM630_IS_TEMPO_RED]    = 0;
-                    sdm630InputRegisters[SDM630_IS_HP]           = 0;
-                    sdm630InputRegisters[SDM630_IS_HC]           = 0;
-                    sdm630InputRegisters[SDM630_IS_BASE_TARIFF]  = 0;
-                    sdm630InputRegisters[SDM630_IS_HPHC_TARIFF]  = 0;
-                    sdm630InputRegisters[SDM630_IS_TEMPO_TARIFF] = 0;
+                    // Clear all tariff flags (preserve overflow / summer bits)
+                    sdm630SetFlag(FLAG_TEMPO_BLUE | FLAG_TEMPO_WHITE | FLAG_TEMPO_RED |
+                                  FLAG_HP | FLAG_HC | FLAG_BASE_TARIFF |
+                                  FLAG_HPHC_TARIFF | FLAG_TEMPO_TARIFF, false);
 
                     String t = String(au8Value);
                     t.toUpperCase();
 
-                    if (t.indexOf("BLEU") >= 0)  { sdm630InputRegisters[SDM630_IS_TEMPO_BLUE]   = 1; sdm630InputRegisters[SDM630_IS_TEMPO_TARIFF] = 1; }
-                    if (t.indexOf("BLANC") >= 0) { sdm630InputRegisters[SDM630_IS_TEMPO_WHITE]  = 1; sdm630InputRegisters[SDM630_IS_TEMPO_TARIFF] = 1; }
-                    if (t.indexOf("ROUGE") >= 0) { sdm630InputRegisters[SDM630_IS_TEMPO_RED]    = 1; sdm630InputRegisters[SDM630_IS_TEMPO_TARIFF] = 1; }
-                    if (t.indexOf("HP") >= 0)    { sdm630InputRegisters[SDM630_IS_HP]           = 1; sdm630InputRegisters[SDM630_IS_HPHC_TARIFF]  = 1; }
-                    if (t.indexOf("HC") >= 0)    { sdm630InputRegisters[SDM630_IS_HC]           = 1; sdm630InputRegisters[SDM630_IS_HPHC_TARIFF]  = 1; }
-                    if (t.indexOf("BASE") >= 0)  { sdm630InputRegisters[SDM630_IS_BASE_TARIFF]  = 1; }
+                    if (t.indexOf("BLEU") >= 0)  sdm630SetFlag(FLAG_TEMPO_BLUE  | FLAG_TEMPO_TARIFF, true);
+                    if (t.indexOf("BLANC") >= 0) sdm630SetFlag(FLAG_TEMPO_WHITE | FLAG_TEMPO_TARIFF, true);
+                    if (t.indexOf("ROUGE") >= 0) sdm630SetFlag(FLAG_TEMPO_RED   | FLAG_TEMPO_TARIFF, true);
+                    if (t.indexOf("HP") >= 0)    sdm630SetFlag(FLAG_HP | FLAG_HPHC_TARIFF, true);
+                    if (t.indexOf("HC") >= 0)    sdm630SetFlag(FLAG_HC | FLAG_HPHC_TARIFF, true);
+                    if (t.indexOf("BASE") >= 0)  sdm630SetFlag(FLAG_BASE_TARIFF, true);
                 } else if (e.sfx == SFX_STGE) {
                     uint32_t stge = strtoul(au8Value, NULL, 16);
                     dispatchSfx(e.sfx, stge);
@@ -578,7 +586,7 @@ bool bDataProcessingStandard(char *au8Command, char *au8Value, uint8_t au8Pos) {
                         sdm630InputRegisters[SDM630_DATE_HOUR]      = d2(au8Value + 7);
                         sdm630InputRegisters[SDM630_DATE_MINUTE]    = d2(au8Value + 9);
                         sdm630InputRegisters[SDM630_DATE_SECOND]    = d2(au8Value + 11);
-                        sdm630InputRegisters[SDM630_DATE_IS_SUMMER] = (au8Value[0] == 'E') ? 1 : 0;
+                        sdm630SetFlag(FLAG_IS_SUMMER, au8Value[0] == 'E');
                     }
                 } else if (e.sfx != SFX_NONE) {
                     uint64_t hv = (uint64_t)strtoull(au8Value, NULL, 16);

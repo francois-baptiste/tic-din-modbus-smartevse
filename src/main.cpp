@@ -313,6 +313,10 @@ static void checkResetButton() {
 void setup() {
     initLed();
 
+#ifdef DEBUG_DEFAULT_ON
+    ConfigSettings.enableDebug = true;   // debug build: app debug prints on from boot
+#endif
+
     // TIC standard mode: 9600 baud, 7 data bits, even parity, 1 stop bit
     Serial.end();
     Serial.setRxBufferSize(2048);

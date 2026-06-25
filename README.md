@@ -305,6 +305,29 @@ modpoll -m rtu -a 11 -r 1 -c 12 -t 3 /dev/ttyUSB0
 
 Registers 6–10 (currents) and 0–4 (voltages) should show non-zero values as soon as the Linky is transmitting.
 
+**Extended custom registers** (FC=04, beyond the SDM630 spec — read by your own master, not SmartEVSE):
+
+| Address | Content | Format |
+|---------|---------|--------|
+| 342–520 | Energy indexes (total, Tempo blue/white/red, HP/HC) | float32 |
+| **600** | **Status flags (bitmask)** — decode with the masks below | uint16 |
+| 609–610 | Contracted power | float32 (kVA) |
+| 612–613 | Temperature | float32 (°C) |
+| 614–623 | Moving averages (active/apparent power, current, voltage, CCASN) | float32 |
+| 624–629 | Date Y/M/D h:m:s | uint16 each |
+
+**Register 600 — packed status flags** (single uint16, decode with a bit mask):
+
+| Bit | Mask | Meaning | Bit | Mask | Meaning |
+|-----|------|---------|-----|------|---------|
+| 0 | `0x001` | Tempo Blue | 5 | `0x020` | Base tariff |
+| 1 | `0x002` | Tempo White | 6 | `0x040` | HP/HC tariff |
+| 2 | `0x004` | Tempo Red | 7 | `0x080` | Tempo tariff |
+| 3 | `0x008` | HP (peak) | 8 | `0x100` | Power overflow |
+| 4 | `0x010` | HC (off-peak) | 9 | `0x200` | Is summer (DST) |
+
+> **Note:** This bitmask replaces the former one-register-per-flag layout (old registers 600–608 plus 630 “is summer”). A master that previously read 9 separate registers now reads a single register 600 and applies the masks above. Example (Home Assistant): `is_tempo_red: "{{ (value | int) & 0x004 > 0 }}"`.
+
 ---
 
 ### Alternative: Custom Meter mode (FC=03) {#custom-meter-mode-alternative}

@@ -484,8 +484,10 @@ void handleStatusNetwork(AsyncWebServerRequest *request)
   auto sdm630U16 = [&](const char* lbl, uint16_t reg, const char* unit) {
     response->printf("<tr><td><strong>%s</strong></td><td>%u %s</td></tr>", lbl, (unsigned)sdm630InputRegisters[reg], unit);
   };
-  auto sdm630BoolU16 = [&](const char* lbl, uint16_t reg) {
-    response->printf("<tr><td><strong>%s</strong></td><td>%s</td></tr>", lbl, sdm630InputRegisters[reg] ? "true" : "false");
+  // Decode one bit of the packed status-flags register (reg 600)
+  auto sdm630Flag = [&](const char* lbl, uint16_t mask) {
+    response->printf("<tr><td><strong>%s</strong></td><td>%s</td></tr>", lbl,
+                     (sdm630InputRegisters[600] & mask) ? "true" : "false");
   };
   sdm630F("0-1 Voltage L1 :",   0,  "V");
   sdm630F("2-3 Voltage L2 :",   2,  "V");
@@ -521,15 +523,17 @@ void handleStatusNetwork(AsyncWebServerRequest *request)
   sdm630F("518-519 Red HC :", 518, "kWh");
   sdm630F("520-521 Red HP :", 520, "kWh");
 
-  sdm630BoolU16("600 Is Tempo Blue :", 600);
-  sdm630BoolU16("601 Is Tempo White :", 601);
-  sdm630BoolU16("602 Is Tempo Red :", 602);
-  sdm630BoolU16("603 Is HP :", 603);
-  sdm630BoolU16("604 Is HC :", 604);
-  sdm630BoolU16("605 Is Base Tariff :", 605);
-  sdm630BoolU16("606 Is HPHC Tariff :", 606);
-  sdm630BoolU16("607 Is Tempo Tariff :", 607);
-  sdm630BoolU16("608 Is Power Overflow :", 608);
+  sdm630U16("600 Status flags (bitmask) :", 600, "");
+  sdm630Flag("&nbsp;&nbsp;bit0 Is Tempo Blue :",    (1u << 0));
+  sdm630Flag("&nbsp;&nbsp;bit1 Is Tempo White :",   (1u << 1));
+  sdm630Flag("&nbsp;&nbsp;bit2 Is Tempo Red :",     (1u << 2));
+  sdm630Flag("&nbsp;&nbsp;bit3 Is HP :",            (1u << 3));
+  sdm630Flag("&nbsp;&nbsp;bit4 Is HC :",            (1u << 4));
+  sdm630Flag("&nbsp;&nbsp;bit5 Is Base Tariff :",   (1u << 5));
+  sdm630Flag("&nbsp;&nbsp;bit6 Is HPHC Tariff :",   (1u << 6));
+  sdm630Flag("&nbsp;&nbsp;bit7 Is Tempo Tariff :",  (1u << 7));
+  sdm630Flag("&nbsp;&nbsp;bit8 Is Power Overflow :",(1u << 8));
+  sdm630Flag("&nbsp;&nbsp;bit9 Is Summer (DST) :",  (1u << 9));
   sdm630F("609-610 Contracted Power :", 609, "kVA");
   sdm630F("612-613 Temperature :", 612, "&deg;C");
 
@@ -544,7 +548,6 @@ void handleStatusNetwork(AsyncWebServerRequest *request)
   sdm630U16("627 Date Hour :", 627, "");
   sdm630U16("628 Date Minute :", 628, "");
   sdm630U16("629 Date Second :", 629, "");
-  sdm630BoolU16("630 Is Summer (E=true, H=false) :", 630);
 
   // TIC Modbus Mapping
   response->print(F("</table></div></div></div>"));
