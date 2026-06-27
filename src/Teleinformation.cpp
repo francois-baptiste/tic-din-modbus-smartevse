@@ -536,6 +536,19 @@ static void dispatchSfx(TicSfx sfx, uint64_t v) {
 
 // ── Data processor ────────────────────────────────────────────────────────────
 
+#include <map>
+static std::map<String, String> linkyRawData;
+
+String getLinkyRawJson() {
+    String json;
+    DynamicJsonDocument doc(2048);
+    for (auto const& pair : linkyRawData) {
+        doc[pair.first] = pair.second;
+    }
+    serializeJson(doc, json);
+    return json;
+}
+
 bool bDataProcessingStandard(char *au8Command, char *au8Value, uint8_t au8Pos) {
     for (size_t n = 0; n < sizeof(s_table) / sizeof(s_table[0]); ++n) {
         const TicEntry &e = s_table[n];
@@ -602,9 +615,11 @@ bool bDataProcessingStandard(char *au8Command, char *au8Value, uint8_t au8Pos) {
             u8ErrorDecode = 3;
             return false;
         }
+        linkyRawData[String(au8Command)] = String(au8Value);
         return true;
     }
 
+    linkyRawData[String(au8Command)] = String(au8Value);
     return true;
 }
 
