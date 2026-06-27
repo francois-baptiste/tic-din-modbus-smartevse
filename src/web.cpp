@@ -17,6 +17,7 @@
 #include "config.h"
 #include "web.h"
 #include "microtar.h"
+#include "Teleinformation.h"
 
 extern struct ConfigSettingsStruct ConfigSettings;
 extern uint16_t wifi_modbus_reg_666;
@@ -431,6 +432,7 @@ void handleStatusNetwork(AsyncWebServerRequest *request)
 
   // WiFi card
   response->print(F("<h1>Network status</h1>"));
+  response->print(F("<a href='/linky.json'>Linky Data (JSON)</a> | <a href='/modbus.json'>Modbus Data (JSON)</a><br><br>"));
   response->print(F("<div class='row' style='--bs-gutter-x: 0.3rem;'><div class='col-sm-3'><div class='card'><div class='card-header'>WiFi Status</div><div class='card-body'><div id='wifiConfig'>"));
   response->print(F("<strong>Enable : </strong>"));
   response->print(ConfigSettings.enableWiFi ? F("<img src='/web/img/ok.png'>") : F("<img src='/web/img/nok.png'>"));
@@ -1649,7 +1651,28 @@ void initWebServer()
     handleHelp(request);
   });
 
+  serverWeb.on("/linky.json", HTTP_GET, [](AsyncWebServerRequest *request) {
+    if (ConfigSettings.enableSecureHttp) {
+      if(!request->authenticate(ConfigSettings.userHTTP, ConfigSettings.passHTTP) )
+        return request->requestAuthentication();
+    }
+    request->send(200, "application/json", getLinkyRawJson());
+  });
 
+  serverWeb.on("/modbus.json", HTTP_GET, [](AsyncWebServerRequest *request) {
+    if (ConfigSettings.enableSecureHttp) {
+      if(!request->authenticate(ConfigSettings.userHTTP, ConfigSettings.passHTTP) )
+        return request->requestAuthentication();
+    }
+    AsyncResponseStream *response = request->beginResponseStream("application/json");
+    response->print("[");
+    for (int i = 0; i < 631; i++) {
+        response->print(sdm630InputRegisters[i]);
+        if (i < 630) response->print(",");
+    }
+    response->print("]");
+    request->send(response);
+  });
 
   serverWeb.serveStatic("/web/js/jquery-min.js", LittleFS, "/web/js/jquery-min.js").setCacheControl("max-age=600");
   serverWeb.serveStatic("/web/js/functions.js", LittleFS, "/web/js/functions.js").setCacheControl("max-age=600");
