@@ -1,7 +1,6 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <LittleFS.h>
-#include "driver/temp_sensor.h"
 #include "Teleinformation.h"
 #include "config.h"
 
@@ -218,8 +217,7 @@ void processMovingAverages() {
         }
 
         // Update temperature register
-        float temp;
-        temp_sensor_read_celsius(&temp);
+        float temp = temperatureRead();
         sdm630WriteFloat(SDM630_TEMPERATURE, temp);
     }
 }

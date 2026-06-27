@@ -4,8 +4,6 @@
 #include <esp_task_wdt.h>
 #include "rom/ets_sys.h"
 #include "soc/rtc_cntl_reg.h"
-#include "driver/temp_sensor.h"
-
 // #include <WebServer.h>
 #include <HTTPClient.h>
 #include <AsyncTCP.h>
@@ -382,8 +380,7 @@ const char HTTP_FOOTER[] PROGMEM =
 
 float temperatureReadFixed()
 {
-  float result = 0;
-  temp_sensor_read_celsius(&result);
+  float result = temperatureRead();
 
   return result;
 }
